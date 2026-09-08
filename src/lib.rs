@@ -239,6 +239,14 @@ fn page_for(state: &AppState, title: &str, active: &str, body: String) -> Respon
 // Handlers
 // ---------------------------------------------------------------------------
 
+async fn healthz() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/plain")
+        .body(axum::body::Body::from("ok"))
+        .expect("static response parts")
+}
+
 async fn login_page(State(state): State<Arc<AppState>>) -> Response {
     if state.config.admin_token.is_none() {
         return page_for(
@@ -771,6 +779,7 @@ fn serde_yaml_to_string(value: &serde_json::Value) -> String {
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/healthz", get(healthz))
         .route("/", get(dashboard))
         .route("/login", get(login_page).post(login_submit))
         .route("/logout", post(logout))
