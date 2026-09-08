@@ -78,6 +78,31 @@ async fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Opt
     })
 }
 
+/// Probe many loopback targets at once. One unreachable service
+/// costs its own timeout once, not the sum of everyone's — the
+/// dashboard's contract when the operator reaches for it mid-incident.
+pub async fn get_all(targets: &[(Option<u16>, &str)]) -> Vec<Option<HttpResponse>> {
+    let mut set = tokio::task::JoinSet::new();
+    for (i, (port, path)) in targets.iter().enumerate() {
+        let port = *port;
+        let path = path.to_string();
+        set.spawn(async move {
+            let resp = match port {
+                Some(p) => get(p, &path).await,
+                None => None,
+            };
+            (i, resp)
+        });
+    }
+    let mut out: Vec<Option<HttpResponse>> = (0..targets.len()).map(|_| None).collect();
+    while let Some(joined) = set.join_next().await {
+        if let Ok((i, resp)) = joined {
+            out[i] = resp;
+        }
+    }
+    out
+}
+
 /// The port of a `host:port` bind string (loopback services).
 pub fn port_of(bind: &str) -> Option<u16> {
     bind.rsplit_once(':').and_then(|(_, p)| p.parse().ok())

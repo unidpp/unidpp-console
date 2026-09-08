@@ -361,10 +361,17 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
             })
             .collect()
     });
+    // One fan-out: every service's /healthz probed concurrently —
+    // N down services cost one timeout, not N.
+    let targets: Vec<(Option<u16>, &str)> = declared
+        .iter()
+        .map(|(_, bind, _, _)| (http::port_of(bind), "/healthz"))
+        .collect();
+    let probes = http::get_all(&targets).await;
     let mut services = Vec::new();
-    for (name, bind, note, public) in declared {
-        let health = match http::port_of(&bind) {
-            Some(port) => match http::get(port, "/healthz").await {
+    for ((name, bind, note, public), probe) in declared.iter().zip(probes) {
+        let health = match http::port_of(bind) {
+            Some(_) => match probe {
                 Some(resp) if resp.status == 200 => {
                     r#"<span class="badge ok">healthy</span>"#.to_string()
                 }
@@ -376,13 +383,13 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         let public_cell = if public.is_empty() {
             r#"<span class="badge warn">loopback</span>"#.to_string()
         } else {
-            format!(r#"<a href="{}">{}</a>"#, esc(&public), esc(&public))
+            format!(r#"<a href="{}">{}</a>"#, esc(public), esc(public))
         };
         services.push(format!(
             r#"<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
-            esc(&name),
-            esc(&bind),
-            esc(&note),
+            esc(name),
+            esc(bind),
+            esc(note),
             public_cell,
             health
         ));
@@ -687,7 +694,15 @@ async fn passports_page(
     );
     body = body.replace("__LOOKUP__", &esc(&lookup));
     if let Some(port) = issuer_port {
-        if let Some(resp) = futures_block(http::get(port, "/passports")) {
+        let (listing_resp, log_resp) = {
+            let mut probes = http::get_all(&[
+                (Some(port), "/passports"),
+                (Some(port), "/admin/log?limit=20"),
+            ])
+            .await;
+            (probes[0].take(), probes[1].take())
+        };
+        if let Some(resp) = listing_resp {
             if let Some(doc) = resp.json() {
                 let mut rows = Vec::new();
                 for entry in doc
@@ -746,8 +761,9 @@ async fn passports_page(
                 ),
             }
         }
-        // The audit log tail: recent lifecycle actions.
-        if let Some(resp) = futures_block(http::get(port, "/admin/log?limit=20")) {
+        // The audit log tail: recent lifecycle actions (probed in the
+        // same fan-out as the listing above).
+        if let Some(resp) = log_resp {
             if let Some(doc) = resp.json() {
                 let mut rows = Vec::new();
                 for entry in doc
@@ -876,41 +892,39 @@ async fn metrics_cards(state: &Arc<AppState>) -> String {
             r#"<div class="card"><div class="label">{label}</div><div class="value">{value}</div></div>"#
         )
     };
-    async fn count_at(port: Option<u16>, path: &str) -> Option<u64> {
-        let doc = match port {
-            Some(port) => http::get(port, path).await.and_then(|r| r.json()),
-            None => None,
-        }?;
-        doc.get("count").and_then(|c| c.as_u64())
+    fn count_at(resp: Option<http::HttpResponse>) -> Option<u64> {
+        resp.and_then(|r| r.json())
+            .and_then(|doc| doc.get("count").and_then(|c| c.as_u64()))
     }
-    let items = count_at(registry_port, "/items?limit=1")
-        .await
+    // One fan-out: the four probes run concurrently.
+    let mut probes = http::get_all(&[
+        (registry_port, "/items?limit=1"),
+        (
+            registry_port,
+            "/items?class=data-element&register=untded&limit=1",
+        ),
+        (log_port, "/tree/head"),
+        (issuer_port, "/passports"),
+    ])
+    .await;
+    let items = count_at(probes[0].take())
         .map(|c| c.to_string())
         .unwrap_or_else(|| "—".to_string());
-    let untded = count_at(
-        registry_port,
-        "/items?class=data-element&register=untded&limit=1",
-    )
-    .await
-    .map(|c| c.to_string())
-    .unwrap_or_else(|| "—".to_string());
-    let tree_size = match log_port {
-        Some(port) => http::get(port, "/tree/head")
-            .await
-            .and_then(|r| r.json())
-            .and_then(|d| d.get("tree_size").and_then(|c| c.as_u64()))
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "—".to_string()),
-        None => "—".to_string(),
-    };
-    let passports = match issuer_port {
-        Some(port) => futures_block(http::get(port, "/passports"))
-            .and_then(|r| r.json())
-            .and_then(|d| d.get("count").and_then(|c| c.as_u64()))
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "—".to_string()),
-        None => "—".to_string(),
-    };
+    let untded = count_at(probes[1].take())
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "—".to_string());
+    let tree_size = probes[2]
+        .take()
+        .and_then(|r| r.json())
+        .and_then(|d| d.get("tree_size").and_then(|c| c.as_u64()))
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "—".to_string());
+    let passports = probes[3]
+        .take()
+        .and_then(|r| r.json())
+        .and_then(|d| d.get("count").and_then(|c| c.as_u64()))
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "—".to_string());
     format!(
         r#"<div class="grid">{}</div>"#,
         [
@@ -1724,6 +1738,44 @@ services:
         assert!(cards.contains("Registry items"));
         assert!(cards.contains("Passports"));
         assert!(cards.contains("Log tree size"));
+    }
+
+    #[tokio::test]
+    async fn unreachable_services_cost_one_timeout_not_their_sum() {
+        // A listener that accepts and holds every connection open:
+        // each probe then pays the FULL read timeout. Four such
+        // services cost serially >= 4x the timeout; concurrently ~one.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind the holding listener");
+        let hold_port = listener.local_addr().unwrap().port();
+        let holder = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock); // held open: never a response
+            }
+            held
+        });
+        let black_hole = format!("127.0.0.1:{hold_port}");
+        let manifest = manifest_yaml().replace(
+            "services:\n  registry:\n    bind: 127.0.0.1:1",
+            format!(
+                "services:\n  registry:\n    bind: {black_hole}\n  trust:\n    bind: {black_hole}\n  log:\n    bind: {black_hole}\n  issuer:\n    bind: {black_hole}"
+            )
+            .as_str(),
+        );
+        let state = state_with(&manifest);
+        let started = std::time::Instant::now();
+        let response = dashboard(axum::extract::State(state)).await;
+        let body = response_into_string(response).await;
+        let elapsed = started.elapsed();
+        assert_eq!(body.matches("unreachable").count(), 4, "all four down");
+        assert!(
+            elapsed < std::time::Duration::from_secs(6),
+            "probes must fan out concurrently (two fan-out rounds ~= 4s; \
+             serial would be >= 16s), took {elapsed:?}"
+        );
+        holder.abort();
     }
 
     #[tokio::test]
