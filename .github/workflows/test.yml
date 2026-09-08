@@ -1,0 +1,40 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: unidpp-console
+    steps:
+      # The crate path-depends on the sibling repositories; check
+      # them out side by side, mirroring the family layout.
+      - uses: actions/checkout@v4
+        with:
+          path: unidpp-console
+      - uses: actions/checkout@v4
+        with:
+          repository: unidpp/unidpp-config
+          path: unidpp-config
+      - uses: actions/checkout@v4
+        with:
+          repository: unidpp/unidpp-core
+          path: unidpp-core
+      - uses: actions/checkout@v4
+        with:
+          repository: unidpp/unidpp-signatif
+          path: unidpp-signatif
+      - uses: actions/checkout@v4
+        with:
+          repository: unidpp/unidpp-cli
+          path: unidpp-cli
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
