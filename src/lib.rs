@@ -621,13 +621,18 @@ async fn registry_browser(
 ) -> Response {
     let class = params.get("class").cloned().unwrap_or_default();
     let register = params.get("register").cloned().unwrap_or_default();
+    let page: usize = params
+        .get("page")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1)
+        .max(1);
     let rows = state.with_manifest(|m| {
         let port = m
             .services
             .registry
             .as_ref()
             .and_then(|s| http::port_of(&s.bind))?;
-        let mut path = "/items?limit=50".to_string();
+        let mut path = format!("/items?limit=50&offset={}", (page - 1) * 50);
         if !class.is_empty() {
             path.push_str(&format!("&class={class}"));
         }
@@ -649,10 +654,37 @@ async fn registry_browser(
                 esc(reg)
             ));
         }
+        let pages = count.div_ceil(50) as usize;
+        let mut pager = String::new();
+        if page > 1 || pages > 1 {
+            let qs = |p: usize| {
+                let mut q = format!("?page={p}");
+                if !class.is_empty() {
+                    q.push_str(&format!("&class={class}"));
+                }
+                if !register.is_empty() {
+                    q.push_str(&format!("&register={register}"));
+                }
+                q
+            };
+            let prev = if page > 1 {
+                format!(r#"<a href="/registry{}">&larr; newer</a>"#, qs(page - 1))
+            } else {
+                String::new()
+            };
+            let next = if page < pages {
+                format!(r#"<a href="/registry{}">older &rarr;</a>"#, qs(page + 1))
+            } else {
+                String::new()
+            };
+            pager = format!(
+                r#"<tr><td colspan="3">page {page} of {pages} · {prev} {next}</td></tr>"#
+            );
+        }
         Some(format!(
             r#"<p>{} item(s)</p><table><tr><th>Identifier</th><th>Class</th><th>Register</th></tr>{}</table>"#,
             count,
-            rows.join("")
+            [rows.join(""), pager].concat()
         ))
     });
     let body = format!(
