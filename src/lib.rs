@@ -311,10 +311,16 @@ async fn login_submit(State(state): State<Arc<AppState>>, Form(form): Form<Login
     }
     let session = state.issue_session();
     let mut response = redirect("/");
+    // Secure exactly when the console is TLS-fronted — a manifest
+    // fact (a declared public_url means an edge terminates TLS), never
+    // a guess; loopback-only deployments keep plain cookies so local
+    // HTTP keeps working.
+    let tls_fronted = state.with_manifest(|m| m.service_public_url("console").is_some());
+    let secure = if tls_fronted { "; Secure" } else { "" };
     response.headers_mut().insert(
         "set-cookie",
         format!(
-            "unidpp_console={session}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+            "unidpp_console={session}; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age={}",
             SESSION_LIFETIME.as_secs()
         )
         .parse()
@@ -1281,17 +1287,86 @@ root.</div>"#
             rows.join("")
         )
     };
+    // The schedule state (the script is the single home of the logic).
+    let schedule = match std::process::Command::new("./unidpp-ops")
+        .arg("schedule")
+        .arg("--status")
+        .current_dir(&root)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+        _ => "unknown (cannot ask unidpp-ops)".to_string(),
+    };
+    // The newest drill report (what was proven, when).
+    let mut drills: Vec<_> = std::fs::read_dir(&dir)
+        .map(|it| {
+            it.flatten()
+                .filter(|e| e.file_name().to_string_lossy().ends_with(".drill.json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    drills.sort_by_key(|e| e.file_name());
+    drills.reverse();
+    let drill_html = match drills.first() {
+        Some(entry) => {
+            let path = entry.path();
+            let doc = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+            match doc {
+                Some(doc) => {
+                    let get = |k: &str| {
+                        doc.get(k)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("—")
+                            .to_string()
+                    };
+                    format!(
+                        r#"<h2>Last restore drill</h2>
+<table>
+<tr><th>Drill</th><td><code>{}</code></td></tr>
+<tr><th>Byte parity</th><td>{}</td></tr>
+<tr><th>Restored manifest</th><td>{}</td></tr>
+<tr><th>Consistency point</th><td><code>{}</code></td></tr>
+</table>
+<p class="note">Run <code>./unidpp-ops drill</code> after every
+upgrade rehearsal. A backup nobody ever restored is a hope.</p>"#,
+                        esc(&get("drill")),
+                        esc(&get("byte_parity")),
+                        esc(&get("manifest_validated")),
+                        esc(&get("consistency_point")),
+                    )
+                }
+                None => r#"<h2>Last restore drill</h2>
+<p class="error">The newest drill report does not parse: {}</p>"#
+                    .replace("{}", &esc(&path.display().to_string())),
+            }
+        }
+        None => r#"<h2>Last restore drill</h2>
+<p>No drill has run yet — a backup nobody ever restored is a hope,
+not a capability.</p>"#
+            .to_string(),
+    };
     Ok(format!(
         r#"<h1>Backups</h1>
 <p class="note">A backup is the deployment as data: the manifest, every
 journal, the seed — checksummed, with the log tree head as the
 consistency point. Restore is <code>unidpp-ops restore</code>.</p>
 {listing}
+{drill_html}
+<h2>Schedule</h2>
+<p>{}</p>
 <h2>Take one now</h2>
-<form method="post" action="/backups">
+<form method="post" action="/backups" style="display:inline">
   <button type="submit">Back up this deployment</button>
 </form>
-<p class="note">Requires a signed-in session.</p>"#
+<form method="post" action="/backups/drill" style="display:inline">
+  <button type="submit" class="secondary">Run a restore drill</button>
+</form>
+<p class="note">Requires a signed-in session.</p>"#,
+        esc(&schedule),
     ))
 }
 
@@ -1334,6 +1409,48 @@ async fn backups_run(State(state): State<Arc<AppState>>, headers: HeaderMap) -> 
     page_for(&state, "Backups", "backups", body)
 }
 
+/// POST /backups/drill — run the restore rehearsal through the
+/// operator script (session-gated; the script owns the logic).
+async fn backups_drill(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !state.session_valid(&headers) {
+        return page_for(
+            &state,
+            "Backups",
+            "backups",
+            r#"<div class="error">Drills require a signed-in session.
+<a href="/login">Sign in</a>.</div>"#
+                .to_string(),
+        );
+    }
+    let root = state
+        .config
+        .manifest_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let output = std::process::Command::new("./unidpp-ops")
+        .arg("drill")
+        .current_dir(&root)
+        .output();
+    let body = match output {
+        Ok(output) if output.status.success() => format!(
+            r#"<div class="note">Drill GREEN — the restore path is proven.</div><pre>{}</pre>
+<a href="/backups">← backups</a>"#,
+            esc(&String::from_utf8_lossy(&output.stdout))
+        ),
+        Ok(output) => format!(
+            r#"<div class="error">The drill failed — do not touch production
+restore until it is understood.</div><pre>{}</pre>
+<a href="/backups">← back</a>"#,
+            esc(&String::from_utf8_lossy(&output.stderr))
+        ),
+        Err(e) => format!(
+            r#"<div class="error">cannot run unidpp-ops: {e}</div><a href="/backups">← back</a>"#
+        ),
+    };
+    page_for(&state, "Backups", "backups", body)
+}
+
 // ---------------------------------------------------------------------------
 // Router + run
 // ---------------------------------------------------------------------------
@@ -1353,6 +1470,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/egress", get(egress_page))
         .route("/tenants", get(tenants_page).post(tenants_create))
         .route("/backups", get(backups_page).post(backups_run))
+        .route("/backups/drill", post(backups_drill))
         .with_state(state)
 }
 
@@ -1606,6 +1724,48 @@ services:
         assert!(cards.contains("Registry items"));
         assert!(cards.contains("Passports"));
         assert!(cards.contains("Log tree size"));
+    }
+
+    #[tokio::test]
+    async fn session_cookie_is_secure_exactly_when_tls_fronted() {
+        let login = |state: Arc<AppState>| async move {
+            login_submit(
+                axum::extract::State(state),
+                Form(LoginForm {
+                    token: "test-token".to_string(),
+                }),
+            )
+            .await
+        };
+        // Loopback-only console: plain cookie (local HTTP keeps working).
+        let plain = login(state_with(&manifest_yaml())).await;
+        let cookie = plain
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .expect("a session cookie");
+        assert!(
+            cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
+            "{cookie}"
+        );
+        assert!(
+            !cookie.contains("Secure"),
+            "loopback must not set Secure: {cookie}"
+        );
+
+        // TLS-fronted console (a declared public_url is the manifest
+        // fact that an edge terminates TLS): Secure present.
+        let with_public = manifest_yaml().replace(
+            "services:\n  registry:",
+            "services:\n  console:\n    bind: 127.0.0.1:9\n    public_url: https://console.unidpp.org\n  registry:",
+        );
+        let secure_login = login(state_with(&with_public)).await;
+        let secure_cookie = secure_login
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .expect("a session cookie");
+        assert!(secure_cookie.contains("Secure"), "{secure_cookie}");
     }
 
     #[tokio::test]
