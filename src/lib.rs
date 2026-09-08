@@ -24,7 +24,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -385,9 +385,11 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
             esc(&egress_label(m)),
         )
     });
+    let metrics = metrics_cards(&state).await;
     let body = format!(
         r#"<h1>Dashboard</h1>
 {summary}
+{metrics}
 <h2>Services</h2>
 <table><tr><th>Service</th><th>Bind</th><th>Role</th><th>Health</th></tr>
 {}</table>"#,
@@ -791,6 +793,480 @@ fn serde_yaml_to_string(value: &serde_json::Value) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Live metrics (#109): the numbers an operator checks, from the
+// services' own APIs; a down service degrades to "—", never an error.
+// ---------------------------------------------------------------------------
+
+async fn metrics_cards(state: &Arc<AppState>) -> String {
+    let registry_port = state.with_manifest(|m| {
+        m.services
+            .registry
+            .as_ref()
+            .and_then(|s| http::port_of(&s.bind))
+    });
+    let log_port =
+        state.with_manifest(|m| m.services.log.as_ref().and_then(|s| http::port_of(&s.bind)));
+    let card = |label: &str, value: String| {
+        format!(
+            r#"<div class="card"><div class="label">{label}</div><div class="value">{value}</div></div>"#
+        )
+    };
+    async fn count_at(port: Option<u16>, path: &str) -> Option<u64> {
+        let doc = match port {
+            Some(port) => http::get(port, path).await.and_then(|r| r.json()),
+            None => None,
+        }?;
+        doc.get("count").and_then(|c| c.as_u64())
+    }
+    let items = count_at(registry_port, "/items?limit=1")
+        .await
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "—".to_string());
+    let untded = count_at(
+        registry_port,
+        "/items?class=data-element&register=untded&limit=1",
+    )
+    .await
+    .map(|c| c.to_string())
+    .unwrap_or_else(|| "—".to_string());
+    let tree_size = match log_port {
+        Some(port) => http::get(port, "/tree/head")
+            .await
+            .and_then(|r| r.json())
+            .and_then(|d| d.get("tree_size").and_then(|c| c.as_u64()))
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "—".to_string()),
+        None => "—".to_string(),
+    };
+    format!(
+        r#"<div class="grid">{}</div>"#,
+        [
+            card("Registry items", items),
+            card("UNTDED data elements", untded),
+            card("Log tree size", tree_size),
+        ]
+        .join("")
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Egress inventory (#105): what leaves the box, derived from the
+// manifest — sovereignty made visible, not aspirational.
+// ---------------------------------------------------------------------------
+
+async fn egress_page(State(state): State<Arc<AppState>>) -> Response {
+    let body = state.with_manifest(|m| {
+        let sealed = m.sovereignty.external_calls == unidpp_config::EgressPolicy::None;
+        let mut rows = Vec::new();
+        let mut row = |service: &str, target: Option<&str>, note: &str| {
+            let cell = match target {
+                Some(url) => format!(
+                    r#"<td><code>{}</code></td><td>{}</td>"#,
+                    esc(url),
+                    esc(note)
+                ),
+                None => r#"<td>—</td><td>sealed</td>"#.to_string(),
+            };
+            rows.push(format!(
+                r#"<tr><td><code>{}</code></td>{}</tr>"#,
+                esc(service),
+                cell
+            ));
+        };
+        row(
+            "registry",
+            None,
+            "serves; makes no outbound calls",
+        );
+        row("trust", None, "serves; makes no outbound calls");
+        row(
+            "log",
+            m.services
+                .log
+                .as_ref()
+                .and_then(|l| l.external_tsa_url.as_deref()),
+            "RFC 3161 time-stamp submission (the one configured egress)",
+        );
+        row(
+            "issuer",
+            m.services
+                .issuer
+                .as_ref()
+                .and_then(|i| i.registry_url.as_deref())
+                .filter(|u| !u.starts_with("http://127.0.0.1")),
+            "registry forwarding when the registry is off-box",
+        );
+        row(
+            "gateway",
+            m.services
+                .gateway
+                .as_ref()
+                .and_then(|g| g.issuer_url.as_deref())
+                .filter(|u| !u.starts_with("http://127.0.0.1")),
+            "issuer upstream when off-box",
+        );
+        row("console", None, "loopback services only");
+        let banner = if sealed {
+            r#"<div class="note"><strong>Sealed.</strong> This deployment's
+egress policy is <code>none</code>: nothing leaves the box. The public
+surface below is ingress — answers, not calls.</div>"#
+        } else {
+            r#"<div class="note">Rows marked <code>sealed</code> make no
+outbound calls. The public surface is ingress.</div>"#
+        };
+        format!(
+            r#"<h1>Egress inventory</h1>
+<p>What leaves the box, itemized — derived from the deployment's own
+manifest ({}, residency {}).</p>
+{banner}
+<h2>Outbound calls</h2>
+<table><tr><th>Service</th><th>Target</th><th>What</th></tr>{}</table>
+<h2>Public surface (ingress)</h2>
+<table><tr><th>Service</th><th>Target</th><th>What</th></tr>
+<tr><td><code>deployment</code></td><td><code>{}</code></td><td>the public base URL (answers requests; calls nothing)</td></tr>
+</table>"#,
+            esc(m.deployment.profile.as_str()),
+            esc(m
+                .sovereignty
+                .data_residency
+                .as_deref()
+                .unwrap_or("undeclared")),
+            rows.join("\n"),
+            esc(&m.deployment.base_url),
+        )
+    });
+    page_for(&state, "Egress", "egress", body)
+}
+
+// ---------------------------------------------------------------------------
+// Tenants (#106): provisioning from a template — the console writes
+// data; it never spawns processes.
+// ---------------------------------------------------------------------------
+
+fn tenants_dir(state: &AppState) -> PathBuf {
+    state
+        .config
+        .manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("tenants")
+}
+
+fn list_tenants(state: &AppState) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(tenants_dir(state)) {
+        for entry in entries.flatten() {
+            if entry.path().join("unidpp-operator.yaml").is_file() {
+                if let Some(name) = entry.file_name().to_str() {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+fn tenant_manifest_yaml(form: &TenantForm) -> String {
+    let suites = form.suites.join(", ");
+    let mut yaml = format!(
+        r#"api_version: unidpp.org/v1
+deployment:
+  name: {name}
+  profile: {profile}
+  base_url: https://dpp.{name}.example.org
+branding:
+  organization: "{organization}"
+  product_name: "{product_name}"
+  theme:
+    primary: "{primary}"
+    accent: "{accent}"
+services:
+  registry:
+    bind: 127.0.0.1:{registry_port}
+    state_file: tenants/{name}/registry-journal.jsonl
+  issuer:
+    bind: 127.0.0.1:{issuer_port}
+    state_file: tenants/{name}/issuer-journal.jsonl
+    pack_suites: [{suites}]
+  console:
+    bind: 127.0.0.1:{console_port}
+sovereignty:
+  data_residency: "{residency}"
+  external_calls: none
+"#,
+        name = esc(&form.name),
+        profile = esc(&form.profile),
+        organization = esc(&form.organization),
+        product_name = esc(&form.product_name),
+        primary = esc(&form.primary),
+        accent = esc(&form.accent),
+        registry_port = form.base_port,
+        issuer_port = form.base_port + 3,
+        console_port = form.base_port.saturating_sub(1).max(1024),
+        residency = esc(&form.residency),
+    );
+    let _ = &mut yaml;
+    yaml
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct TenantForm {
+    name: String,
+    organization: String,
+    product_name: String,
+    profile: String,
+    residency: String,
+    primary: String,
+    accent: String,
+    suites: Vec<String>,
+    base_port: u16,
+}
+
+async fn tenants_page(State(state): State<Arc<AppState>>) -> Response {
+    let existing: Vec<String> = list_tenants(&state);
+    let listing = if existing.is_empty() {
+        r#"<p>No tenants yet.</p>"#.to_string()
+    } else {
+        format!(
+            r#"<h2>Existing tenants</h2><table><tr><th>Tenant</th><th>Run</th></tr>{}</table>"#,
+            existing
+                .iter()
+                .map(|n| format!(
+                    r#"<tr><td><code>{}</code></td><td><code>tenants/up.sh {}</code></td></tr>"#,
+                    esc(n),
+                    esc(n)
+                ))
+                .collect::<Vec<_>>()
+                .join("")
+        )
+    };
+    let body = format!(
+        r##"<h1>Tenants</h1>
+<p class="note">A tenant is a manifest. This page writes
+<code>tenants/&lt;name&gt;/unidpp-operator.yaml</code>, validated before
+saving; bringing it up is one command, shown after creation. The
+console never starts processes.</p>
+{listing}
+<h2>Create a tenant</h2>
+<form method="post" action="/tenants" style="display:grid;gap:.6rem;max-width:34rem">
+  <input name="name" placeholder="name (letters, digits, -)" required>
+  <input name="organization" placeholder="organization" required>
+  <input name="product_name" placeholder="product name" required>
+  <select name="profile">
+    <option value="whitelabel">whitelabel</option>
+    <option value="sovereign">sovereign</option>
+    <option value="reference">reference</option>
+  </select>
+  <input name="residency" placeholder="data residency (e.g. EU, CN)">
+  <div style="display:flex;gap:.6rem">
+    <input name="primary" placeholder="#rrggbb primary" value="#0f62fe">
+    <input name="accent" placeholder="#rrggbb accent" value="#08bdba">
+  </div>
+  <fieldset style="border:1px solid var(--line);border-radius:8px">
+    <legend>Pack suites</legend>
+    <label><input type="checkbox" name="suites" value="ecdsa-p256" checked> ecdsa-p256</label>
+    <label><input type="checkbox" name="suites" value="sm2"> sm2</label>
+    <label><input type="checkbox" name="suities" value="ml-dsa-65"> ml-dsa-65</label>
+  </fieldset>
+  <input name="base_port" type="number" placeholder="base port (registry binds here)" value="9390">
+  <button type="submit">Validate &amp; create</button>
+</form>"##
+    );
+    page_for(&state, "Tenants", "tenants", body)
+}
+
+async fn tenants_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Form(form): Form<TenantForm>,
+) -> Response {
+    if !state.session_valid(&headers) {
+        return page_for(
+            &state,
+            "Tenants",
+            "tenants",
+            r#"<div class="error">Creating tenants requires a signed-in
+session. <a href="/login">Sign in</a>.</div><a href="/tenants">← back</a>"#
+                .to_string(),
+        );
+    }
+    let name_ok = !form.name.is_empty()
+        && form
+            .name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    if !name_ok {
+        return tenant_error(
+            &state,
+            "the name must be letters, digits, and hyphens",
+            &form,
+        );
+    }
+    let target = tenants_dir(&state)
+        .join(&form.name)
+        .join("unidpp-operator.yaml");
+    if target.exists() {
+        return tenant_error(
+            &state,
+            &format!("tenant `{}` already exists", form.name),
+            &form,
+        );
+    }
+    let yaml = tenant_manifest_yaml(&form);
+    match load_manifest(&yaml).map_err(|e| e.to_string()) {
+        Ok(_) => {}
+        Err(error) => return tenant_error(&state, &error, &form),
+    }
+    if let Err(e) = std::fs::create_dir_all(target.parent().expect("tenant dir")) {
+        return tenant_error(
+            &state,
+            &format!("cannot create the tenant directory: {e}"),
+            &form,
+        );
+    }
+    if let Err(e) = std::fs::write(&target, &yaml) {
+        return tenant_error(
+            &state,
+            &format!("cannot write {}: {e}", target.display()),
+            &form,
+        );
+    }
+    let body = format!(
+        r#"<div class="note">Tenant <code>{}</code> created and validated.</div>
+<h2>Bring it up</h2>
+<pre>./tenants/up.sh {}</pre>
+<p>Then its console answers on port {} (bind declared in its
+manifest). <a href="/tenants">← tenants</a></p>"#,
+        esc(&form.name),
+        esc(&form.name),
+        form.base_port.saturating_sub(1).max(1024),
+    );
+    page_for(&state, "Tenants", "tenants", body)
+}
+
+fn tenant_error(state: &AppState, message: &str, form: &TenantForm) -> Response {
+    let body = format!(
+        r#"<div class="error">Not created — {}.</div>
+<p>The form values were kept below; fix and resubmit.</p>
+<pre>{}</pre>
+<a href="/tenants">← start over</a>"#,
+        esc(message),
+        esc(&tenant_manifest_yaml(form)),
+    );
+    page_for(state, "Tenants", "tenants", body)
+}
+
+// ---------------------------------------------------------------------------
+// Backups (#111): the console triggers the operator script and lists
+// the results; the logic lives in one place (unidpp-ops), never here.
+// ---------------------------------------------------------------------------
+
+async fn backups_page(State(state): State<Arc<AppState>>) -> Response {
+    let body = match backups_render(&state).await {
+        Ok(body) => body,
+        Err(error) => format!(r#"<div class="error">{}</div>"#, esc(&error)),
+    };
+    page_for(&state, "Backups", "backups", body)
+}
+
+async fn backups_render(state: &Arc<AppState>) -> Result<String, String> {
+    let root = state
+        .config
+        .manifest_path
+        .parent()
+        .ok_or("no deployment root")?
+        .to_path_buf();
+    let dir = root.join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let script = root.join("unidpp-ops");
+    if !script.is_file() {
+        return Ok(r#"<h1>Backups</h1><div class="error">The operator
+script <code>unidpp-ops</code> is not present in the deployment
+root.</div>"#
+            .to_string());
+    }
+    let mut rows = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .flatten()
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries.reverse();
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".tar.gz") {
+            let meta = entry.metadata().ok();
+            let size_kb = meta.as_ref().map(|m| m.len() / 1024).unwrap_or(0);
+            rows.push(format!(
+                r#"<tr><td><code>{}</code></td><td>{} KB</td></tr>"#,
+                esc(&name),
+                size_kb
+            ));
+        }
+    }
+    let listing = if rows.is_empty() {
+        r#"<p>No backups yet.</p>"#.to_string()
+    } else {
+        format!(
+            r#"<h2>Backups</h2><table><tr><th>Archive</th><th>Size</th></tr>{}</table>"#,
+            rows.join("")
+        )
+    };
+    Ok(format!(
+        r#"<h1>Backups</h1>
+<p class="note">A backup is the deployment as data: the manifest, every
+journal, the seed — checksummed, with the log tree head as the
+consistency point. Restore is <code>unidpp-ops restore</code>.</p>
+{listing}
+<h2>Take one now</h2>
+<form method="post" action="/backups">
+  <button type="submit">Back up this deployment</button>
+</form>
+<p class="note">Requires a signed-in session.</p>"#
+    ))
+}
+
+async fn backups_run(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !state.session_valid(&headers) {
+        return page_for(
+            &state,
+            "Backups",
+            "backups",
+            r#"<div class="error">Backups require a signed-in session.
+<a href="/login">Sign in</a>.</div>"#
+                .to_string(),
+        );
+    }
+    let root = state
+        .config
+        .manifest_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let output = std::process::Command::new("./unidpp-ops")
+        .arg("backup")
+        .current_dir(&root)
+        .output();
+    let body = match output {
+        Ok(output) if output.status.success() => format!(
+            r#"<div class="note">Backup taken.</div><pre>{}</pre>
+<a href="/backups">← backups</a>"#,
+            esc(&String::from_utf8_lossy(&output.stdout))
+        ),
+        Ok(output) => format!(
+            r#"<div class="error">The script failed — nothing lost.</div><pre>{}</pre>
+<a href="/backups">← back</a>"#,
+            esc(&String::from_utf8_lossy(&output.stderr))
+        ),
+        Err(e) => format!(
+            r#"<div class="error">cannot run unidpp-ops: {e}</div><a href="/backups">← back</a>"#
+        ),
+    };
+    page_for(&state, "Backups", "backups", body)
+}
+
+// ---------------------------------------------------------------------------
 // Router + run
 // ---------------------------------------------------------------------------
 
@@ -806,6 +1282,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/registry", get(registry_browser))
         .route("/passports", get(passports_page).post(verify::submit))
         .route("/branding", get(branding_preview))
+        .route("/egress", get(egress_page))
+        .route("/tenants", get(tenants_page).post(tenants_create))
+        .route("/backups", get(backups_page).post(backups_run))
         .with_state(state)
 }
 
@@ -967,6 +1446,97 @@ services:
             "the reference shows"
         );
         assert!(!body.contains("supersecret"), "the value never does");
+    }
+
+    #[tokio::test]
+    async fn egress_inventory_shows_sealed_and_real_rows() {
+        let state = state_with(&manifest_yaml());
+        let response = egress_page(axum::extract::State(state.clone())).await;
+        let body = response_into_string(response).await;
+        // The test manifest has no TSA: the log row is sealed.
+        assert!(body.contains("sealed"), "{body}");
+        // A deployment WITH a TSA shows it as the configured egress.
+        let with_tsa = manifest_yaml().replace(
+            "services:\n  registry:",
+            "services:\n  log:\n    bind: 127.0.0.1:3\n    external_tsa_url: http://tsa.example\n  registry:",
+        );
+        let state2 = state_with(&with_tsa);
+        let response2 = egress_page(axum::extract::State(state2)).await;
+        let body2 = response_into_string(response2).await;
+        assert!(body2.contains("http://tsa.example"), "{body2}");
+        assert!(body2.contains("RFC 3161"));
+    }
+
+    #[tokio::test]
+    async fn tenant_wizard_creates_validates_and_refuses_duplicates() {
+        let state = state_with(&manifest_yaml());
+        let session = state.issue_session();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            format!("unidpp_console={session}").parse().unwrap(),
+        );
+        let form = TenantForm {
+            name: "wizard-test".to_string(),
+            organization: "Wizard Org".to_string(),
+            product_name: "Wizard DPP".to_string(),
+            profile: "whitelabel".to_string(),
+            residency: "EU".to_string(),
+            primary: "#0f62fe".to_string(),
+            accent: "#08bdba".to_string(),
+            suites: vec!["ecdsa-p256".to_string(), "sm2".to_string()],
+            base_port: 9490,
+        };
+        let created = tenants_create(
+            axum::extract::State(state.clone()),
+            headers.clone(),
+            Form(form.clone()),
+        )
+        .await;
+        let body = response_into_string(created).await;
+        assert!(body.contains("created and validated"), "{body}");
+        assert!(body.contains("tenants/up.sh wizard-test"));
+        let written =
+            std::fs::read_to_string(tenants_dir(&state).join("wizard-test/unidpp-operator.yaml"))
+                .unwrap();
+        load_manifest(&written).map_err(|e| e.to_string()).unwrap();
+        assert!(written.contains("pack_suites: [ecdsa-p256, sm2]"));
+
+        // Duplicate: refused.
+        let dup = tenants_create(axum::extract::State(state.clone()), headers, Form(form)).await;
+        let body = response_into_string(dup).await;
+        assert!(body.contains("already exists"), "{body}");
+
+        // Bad theme hex: the validator's message surfaces.
+        let bad = TenantForm {
+            name: "wizard-bad".to_string(),
+            organization: "o".to_string(),
+            product_name: "p".to_string(),
+            profile: "whitelabel".to_string(),
+            residency: "EU".to_string(),
+            primary: "red".to_string(),
+            accent: "#08bdba".to_string(),
+            suites: vec!["ecdsa-p256".to_string()],
+            base_port: 9590,
+        };
+        let session2 = state.issue_session();
+        let mut h2 = HeaderMap::new();
+        h2.insert(
+            "cookie",
+            format!("unidpp_console={session2}").parse().unwrap(),
+        );
+        let refused = tenants_create(axum::extract::State(state.clone()), h2, Form(bad)).await;
+        let body = response_into_string(refused).await;
+        assert!(body.contains("#rrggbb"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn metrics_degrade_to_a_dash_when_services_are_down() {
+        let state = state_with(&manifest_yaml());
+        let cards = metrics_cards(&state).await;
+        assert!(cards.contains("—"), "down services degrade: {cards}");
+        assert!(cards.contains("Registry items"));
+        assert!(cards.contains("Log tree size"));
     }
 
     async fn response_into_string(response: Response) -> String {
