@@ -239,6 +239,23 @@ fn page_for(state: &AppState, title: &str, active: &str, body: String) -> Respon
 // Handlers
 // ---------------------------------------------------------------------------
 
+/// The service identity (the orchestrator's probe reads it).
+async fn service_identity(State(state): State<Arc<AppState>>) -> Response {
+    let body = state.with_manifest(|m| {
+        serde_json::json!({
+            "service": "unidpp-console",
+            "deployment": m.deployment.name,
+            "profile": m.deployment.profile.as_str(),
+            "product": m.branding.product_name,
+        })
+    });
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .expect("static response parts")
+}
+
 async fn healthz() -> Response {
     Response::builder()
         .status(StatusCode::OK)
@@ -780,6 +797,7 @@ fn serde_yaml_to_string(value: &serde_json::Value) -> String {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/.well-known/unidpp-service", get(service_identity))
         .route("/", get(dashboard))
         .route("/login", get(login_page).post(login_submit))
         .route("/logout", post(logout))
