@@ -342,17 +342,21 @@ async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Respo
 }
 
 async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
-    let declared: Vec<(String, String, String)> = state.with_manifest(|m| {
+    let declared: Vec<(String, String, String, String)> = state.with_manifest(|m| {
         m.service_names()
             .iter()
             .map(|name| {
                 let (bind, note) = service_bind_note(m, name);
-                (name.to_string(), bind, note)
+                let public = m
+                    .service_public_url(name)
+                    .map(|u| u.to_string())
+                    .unwrap_or_default();
+                (name.to_string(), bind, note, public)
             })
             .collect()
     });
     let mut services = Vec::new();
-    for (name, bind, note) in declared {
+    for (name, bind, note, public) in declared {
         let health = match http::port_of(&bind) {
             Some(port) => match http::get(port, "/healthz").await {
                 Some(resp) if resp.status == 200 => {
@@ -363,11 +367,17 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
             },
             None => r#"<span class="badge warn">no bind</span>"#.to_string(),
         };
+        let public_cell = if public.is_empty() {
+            r#"<span class="badge warn">loopback</span>"#.to_string()
+        } else {
+            format!(r#"<a href="{}">{}</a>"#, esc(&public), esc(&public))
+        };
         services.push(format!(
-            r#"<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td></tr>"#,
+            r#"<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
             esc(&name),
             esc(&bind),
             esc(&note),
+            public_cell,
             health
         ));
     }
@@ -391,7 +401,7 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
 {summary}
 {metrics}
 <h2>Services</h2>
-<table><tr><th>Service</th><th>Bind</th><th>Role</th><th>Health</th></tr>
+<table><tr><th>Service</th><th>Bind</th><th>Role</th><th>Public</th><th>Health</th></tr>
 {}</table>"#,
         services.join("\n")
     );
@@ -671,6 +681,49 @@ async fn passports_page(
     );
     body = body.replace("__LOOKUP__", &esc(&lookup));
     if let Some(port) = issuer_port {
+        if let Some(resp) = futures_block(http::get(port, "/passports")) {
+            if let Some(doc) = resp.json() {
+                let mut rows = Vec::new();
+                for entry in doc
+                    .get("passports")
+                    .and_then(|p| p.as_array())
+                    .unwrap_or(&vec![])
+                {
+                    let id = entry
+                        .get("passport_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let product = entry
+                        .get("product_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let capability = entry
+                        .get("capability")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let eo = entry.get("eo_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let events = entry.get("events").and_then(|v| v.as_u64()).unwrap_or(0);
+                    rows.push(format!(
+                        r#"<tr><td><a href="/passports?id={}"><code>{}</code></a></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                        urlencode(id),
+                        esc(id),
+                        esc(product),
+                        esc(capability),
+                        esc(eo),
+                        events
+                    ));
+                }
+                let count = doc.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+                if !rows.is_empty() {
+                    body.push_str(&format!(
+                        r#"<h2>Issued ({} passports)</h2>
+<table><tr><th>Passport</th><th>Product</th><th>Capability</th><th>Economic operator</th><th>Events</th></tr>{}</table>"#,
+                        count,
+                        rows.join("")
+                    ));
+                }
+            }
+        }
         if !lookup.is_empty() {
             let path = format!("/passports/{}", urlencode(&lookup));
             match futures_block(http::get(port, &path)) {
@@ -806,6 +859,12 @@ async fn metrics_cards(state: &Arc<AppState>) -> String {
     });
     let log_port =
         state.with_manifest(|m| m.services.log.as_ref().and_then(|s| http::port_of(&s.bind)));
+    let issuer_port = state.with_manifest(|m| {
+        m.services
+            .issuer
+            .as_ref()
+            .and_then(|s| http::port_of(&s.bind))
+    });
     let card = |label: &str, value: String| {
         format!(
             r#"<div class="card"><div class="label">{label}</div><div class="value">{value}</div></div>"#
@@ -838,11 +897,20 @@ async fn metrics_cards(state: &Arc<AppState>) -> String {
             .unwrap_or_else(|| "—".to_string()),
         None => "—".to_string(),
     };
+    let passports = match issuer_port {
+        Some(port) => futures_block(http::get(port, "/passports"))
+            .and_then(|r| r.json())
+            .and_then(|d| d.get("count").and_then(|c| c.as_u64()))
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "—".to_string()),
+        None => "—".to_string(),
+    };
     format!(
         r#"<div class="grid">{}</div>"#,
         [
             card("Registry items", items),
             card("UNTDED data elements", untded),
+            card("Passports", passports),
             card("Log tree size", tree_size),
         ]
         .join("")
@@ -1536,7 +1604,35 @@ services:
         let cards = metrics_cards(&state).await;
         assert!(cards.contains("—"), "down services degrade: {cards}");
         assert!(cards.contains("Registry items"));
+        assert!(cards.contains("Passports"));
         assert!(cards.contains("Log tree size"));
+    }
+
+    #[tokio::test]
+    async fn services_matrix_renders_declared_public_urls() {
+        // No public_url: the registry row reads loopback-only.
+        let state = state_with(&manifest_yaml());
+        let response = dashboard(axum::extract::State(state.clone())).await;
+        let body = response_into_string(response).await;
+        assert!(body.contains("<th>Public</th>"), "{body}");
+        assert!(body.contains("loopback"), "{body}");
+
+        // A declared public URL renders as the link (and only as the
+        // manifest says — the console invents nothing).
+        let with_public = manifest_yaml().replace(
+            "  registry:
+    bind: 127.0.0.1:1",
+            "  registry:
+    bind: 127.0.0.1:1
+    public_url: https://registry.unidpp.org",
+        );
+        let state2 = state_with(&with_public);
+        let response2 = dashboard(axum::extract::State(state2)).await;
+        let body2 = response_into_string(response2).await;
+        assert!(
+            body2.contains(r#"<a href="https://registry.unidpp.org">"#),
+            "{body2}"
+        );
     }
 
     async fn response_into_string(response: Response) -> String {
