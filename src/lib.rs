@@ -679,6 +679,11 @@ async fn passports_page(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Response {
     let lookup = params.get("id").cloned().unwrap_or_default();
+    let page: usize = params
+        .get("page")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1)
+        .max(1);
     let issuer_port = state.with_manifest(|m| {
         m.services
             .issuer
@@ -694,9 +699,10 @@ async fn passports_page(
     );
     body = body.replace("__LOOKUP__", &esc(&lookup));
     if let Some(port) = issuer_port {
+        let listing_path = format!("/passports?limit=100&offset={}", (page - 1) * 100);
         let (listing_resp, log_resp) = {
             let mut probes = http::get_all(&[
-                (Some(port), "/passports"),
+                (Some(port), listing_path.as_str()),
                 (Some(port), "/admin/log?limit=20"),
             ])
             .await;
@@ -735,6 +741,22 @@ async fn passports_page(
                     ));
                 }
                 let count = doc.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+                let pages: usize = count.div_ceil(100) as usize;
+                if page > 1 || pages > 1 {
+                    let prev = if page > 1 {
+                        format!(r#"<a href="/passports?page={}">&larr; newer</a>"#, page - 1)
+                    } else {
+                        String::new()
+                    };
+                    let next = if page < pages {
+                        format!(r#"<a href="/passports?page={}">older &rarr;</a>"#, page + 1)
+                    } else {
+                        String::new()
+                    };
+                    rows.push(format!(
+                        r#"<tr><td colspan="5">page {page} of {pages} · {prev} {next}</td></tr>"#
+                    ));
+                }
                 if !rows.is_empty() {
                     body.push_str(&format!(
                         r#"<h2>Issued ({} passports)</h2>
