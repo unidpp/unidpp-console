@@ -5,6 +5,12 @@
 
 use unidpp_config::{Branding, OperatorManifest};
 
+mod i18n_labels {
+    pub fn footer_deployment(locale: &str) -> String {
+        crate::i18n::t(locale, "foot.deployment").to_string()
+    }
+}
+
 /// Escape every interpolatable value (the anti-XSS chokepoint).
 pub fn esc(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -40,7 +46,7 @@ pub fn page(manifest: &OperatorManifest, title: &str, body: &str, nav_active: &s
 </header>
 <main>{body}</main>
 <footer class="foot">
-  <span>{profile} deployment · {name}</span>
+  <span>{profile} {deployment_label} · {name}</span>
   {footer_links}
 </footer>
 </body>
@@ -51,8 +57,9 @@ pub fn page(manifest: &OperatorManifest, title: &str, body: &str, nav_active: &s
         logo = logo_html(branding),
         org = esc(&branding.organization),
         product = esc(&branding.product_name),
-        nav = nav_html(nav_active),
+        nav = nav_html(nav_active, &branding.locale),
         profile = esc(manifest.deployment.profile.as_str()),
+        deployment_label = esc(&i18n_labels::footer_deployment(&branding.locale)),
         name = esc(&manifest.deployment.name),
         footer_links = footer_html(branding),
     )
@@ -68,12 +75,21 @@ fn logo_html(branding: &Branding) -> String {
 }
 
 fn footer_html(branding: &Branding) -> String {
+    let locale = &branding.locale;
     let mut links = Vec::new();
     if let Some(url) = &branding.footer.legal_url {
-        links.push(format!(r#"<a href="{}">legal</a>"#, esc(url)));
+        links.push(format!(
+            r#"<a href="{}">{}</a>"#,
+            esc(url),
+            crate::i18n::t(locale, "foot.legal")
+        ));
     }
     if let Some(url) = &branding.footer.contact_url {
-        links.push(format!(r#"<a href="{}">contact</a>"#, esc(url)));
+        links.push(format!(
+            r#"<a href="{}">{}</a>"#,
+            esc(url),
+            crate::i18n::t(locale, "foot.contact")
+        ));
     }
     if links.is_empty() {
         String::new()
@@ -82,17 +98,18 @@ fn footer_html(branding: &Branding) -> String {
     }
 }
 
-fn nav_html(active: &str) -> String {
-    const ITEMS: &[(&str, &str, &str)] = &[
-        ("dashboard", "/", "Dashboard"),
-        ("config", "/config", "Configuration"),
-        ("registry", "/registry", "Registry"),
-        ("passports", "/passports", "Passports"),
-        ("branding", "/branding", "Branding"),
+fn nav_html(active: &str, locale: &str) -> String {
+    const ITEMS: &[(&str, &str)] = &[
+        ("dashboard", "/"),
+        ("config", "/config"),
+        ("registry", "/registry"),
+        ("passports", "/passports"),
+        ("branding", "/branding"),
     ];
     ITEMS
         .iter()
-        .map(|(key, href, label)| {
+        .map(|(key, href)| {
+            let label = crate::i18n::t(locale, &format!("nav.{key}"));
             if *key == active {
                 format!(r#"<a class="active" href="{href}">{label}</a>"#)
             } else {

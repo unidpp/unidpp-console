@@ -39,6 +39,7 @@ use unidpp_config::{load as load_manifest, render_env, OperatorManifest};
 
 mod html;
 mod http;
+mod i18n;
 mod verify;
 
 use html::esc;
@@ -231,7 +232,16 @@ fn redirect(location: &str) -> Response {
 }
 
 fn page_for(state: &AppState, title: &str, active: &str, body: String) -> Response {
-    let full = state.with_manifest(|m| html::page(m, title, &body, active));
+    let full = state.with_manifest(|m| {
+        let locale = m.branding.locale.clone();
+        let localized = i18n::t(&locale, &format!("page.{}", title.to_lowercase()));
+        let shown = if localized.is_empty() {
+            title
+        } else {
+            localized
+        };
+        html::page(m, shown, &body, active)
+    });
     html_response(full)
 }
 
@@ -277,18 +287,20 @@ configuration saves require <code>UNIDPP_CONSOLE_ADMIN_TOKEN</code>.</p>
                 .to_string(),
         );
     }
-    page_for(
-        &state,
-        "Sign in",
-        "",
-        r#"<div class="card" style="max-width:26rem;margin:4rem auto;text-align:center">
-<h1>Sign in</h1>
+    page_for(&state, "Sign in", "", {
+        let locale = state.with_manifest(|m| m.branding.locale.clone());
+        format!(
+            r#"<div class="card" style="max-width:26rem;margin:4rem auto;text-align:center">
+<h1>{}</h1>
 <form method="post" action="/login">
-  <input type="password" name="token" placeholder="admin token" style="width:100%" autofocus>
-  <button type="submit" style="width:100%;margin-top:.6rem">Sign in</button>
-</form></div>"#
-            .to_string(),
-    )
+  <input type="password" name="token" placeholder="{}" style="width:100%" autofocus>
+  <button type="submit" style="width:100%;margin-top:.6rem">{}</button>
+</form></div>"#,
+            i18n::t(&locale, "login.title"),
+            i18n::t(&locale, "login.hint"),
+            i18n::t(&locale, "login.button"),
+        )
+    })
 }
 
 #[derive(Deserialize)]
@@ -370,18 +382,31 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
     let probes = http::get_all(&targets).await;
     let mut services = Vec::new();
     for ((name, bind, note, public), probe) in declared.iter().zip(probes) {
+        let loc = state.with_manifest(|m| m.branding.locale.clone());
         let health = match http::port_of(bind) {
             Some(_) => match probe {
                 Some(resp) if resp.status == 200 => {
-                    r#"<span class="badge ok">healthy</span>"#.to_string()
+                    format!(
+                        r#"<span class="badge ok">{}</span>"#,
+                        i18n::t(&loc, "mx.healthy")
+                    )
                 }
                 Some(resp) => format!(r#"<span class="badge bad">HTTP {}</span>"#, resp.status),
-                None => r#"<span class="badge bad">unreachable</span>"#.to_string(),
+                None => format!(
+                    r#"<span class="badge bad">{}</span>"#,
+                    i18n::t(&loc, "mx.unreachable")
+                ),
             },
-            None => r#"<span class="badge warn">no bind</span>"#.to_string(),
+            None => format!(
+                r#"<span class="badge warn">{}</span>"#,
+                i18n::t(&loc, "mx.no_bind")
+            ),
         };
         let public_cell = if public.is_empty() {
-            r#"<span class="badge warn">loopback</span>"#.to_string()
+            format!(
+                r#"<span class="badge warn">{}</span>"#,
+                i18n::t(&loc, "mx.loopback")
+            )
         } else {
             format!(r#"<a href="{}">{}</a>"#, esc(public), esc(public))
         };
@@ -395,28 +420,40 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         ));
     }
     let summary = state.with_manifest(|m| {
+        let loc = &m.branding.locale;
         format!(
             r#"<div class="grid">
-  <div class="card"><div class="label">Deployment</div><div class="value">{}</div></div>
-  <div class="card"><div class="label">Profile</div><div class="value">{}</div></div>
-  <div class="card"><div class="label">Base URL</div><div class="value" style="font-size:.95rem">{}</div></div>
-  <div class="card"><div class="label">Egress policy</div><div class="value" style="font-size:.95rem">{}</div></div>
+  <div class="card"><div class="label">{}</div><div class="value">{}</div></div>
+  <div class="card"><div class="label">{}</div><div class="value">{}</div></div>
+  <div class="card"><div class="label">{}</div><div class="value" style="font-size:.95rem">{}</div></div>
+  <div class="card"><div class="label">{}</div><div class="value" style="font-size:.95rem">{}</div></div>
 </div>"#,
+            i18n::t(loc, "card.deployment"),
             esc(&m.deployment.name),
+            i18n::t(loc, "card.profile"),
             esc(m.deployment.profile.as_str()),
+            i18n::t(loc, "card.base_url"),
             esc(&m.deployment.base_url),
+            i18n::t(loc, "card.egress"),
             esc(&egress_label(m)),
         )
     });
     let metrics = metrics_cards(&state).await;
+    let locale = state.with_manifest(|m| m.branding.locale.clone());
     let body = format!(
-        r#"<h1>Dashboard</h1>
+        r#"<h1>{title}</h1>
 {summary}
 {metrics}
 <h2>Services</h2>
-<table><tr><th>Service</th><th>Bind</th><th>Role</th><th>Public</th><th>Health</th></tr>
-{}</table>"#,
-        services.join("\n")
+<table><tr><th>{svc}</th><th>{bind}</th><th>{role}</th><th>{public}</th><th>{health}</th></tr>
+{rows}</table>"#,
+        title = i18n::t(&locale, "page.dashboard"),
+        svc = i18n::t(&locale, "mx.service"),
+        bind = i18n::t(&locale, "mx.bind"),
+        role = i18n::t(&locale, "mx.role"),
+        public = i18n::t(&locale, "mx.public"),
+        health = i18n::t(&locale, "mx.health"),
+        rows = services.join("\n"),
     );
     page_for(&state, "Dashboard", "dashboard", body)
 }
@@ -848,7 +885,8 @@ async fn passports_page(
             }
         }
         // Pack verification through the CLI's own pipeline.
-        body.push_str(&verify::form_html(port).await);
+        let locale = state.with_manifest(|m| m.branding.locale.clone());
+        body.push_str(&verify::form_html(port, &locale).await);
     } else {
         body.push_str(r#"<div class="error">This deployment declares no issuer.</div>"#);
     }
@@ -1085,13 +1123,14 @@ async fn metrics_cards(state: &Arc<AppState>) -> String {
         .and_then(|d| d.get("count").and_then(|c| c.as_u64()))
         .map(|c| c.to_string())
         .unwrap_or_else(|| "—".to_string());
+    let loc = state.with_manifest(|m| m.branding.locale.clone());
     format!(
         r#"<div class="grid">{}</div>"#,
         [
-            card("Registry items", items),
-            card("UNTDED data elements", untded),
-            card("Passports", passports),
-            card("Log tree size", tree_size),
+            card(i18n::t(&loc, "card.registry_items"), items),
+            card(i18n::t(&loc, "card.untded"), untded),
+            card(i18n::t(&loc, "card.passports"), passports),
+            card(i18n::t(&loc, "card.log_tree"), tree_size),
         ]
         .join("")
     )
@@ -1523,6 +1562,8 @@ upgrade rehearsal. A backup nobody ever restored is a hope.</p>"#,
 not a capability.</p>"#
             .to_string(),
     };
+    let backup_btn = state.with_manifest(|m| i18n::t(&m.branding.locale, "btn.backup"));
+    let drill_btn = state.with_manifest(|m| i18n::t(&m.branding.locale, "btn.drill"));
     Ok(format!(
         r#"<h1>Backups</h1>
 <p class="note">A backup is the deployment as data: the manifest, every
@@ -1534,13 +1575,15 @@ consistency point. Restore is <code>unidpp-ops restore</code>.</p>
 <p>{}</p>
 <h2>Take one now</h2>
 <form method="post" action="/backups" style="display:inline">
-  <button type="submit">Back up this deployment</button>
+  <button type="submit">{backup_btn}</button>
 </form>
 <form method="post" action="/backups/drill" style="display:inline">
-  <button type="submit" class="secondary">Run a restore drill</button>
+  <button type="submit" class="secondary">{drill_btn}</button>
 </form>
 <p class="note">Requires a signed-in session.</p>"#,
         esc(&schedule),
+        backup_btn = backup_btn,
+        drill_btn = drill_btn,
     ))
 }
 
@@ -1910,6 +1953,31 @@ services:
             legal_url: String::new(),
             contact_url: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn zh_cn_manifest_renders_a_chinese_chrome() {
+        let zh = manifest_yaml().replace("branding:\n", "branding:\n  locale: zh-CN\n");
+        let state = state_with(&zh);
+        let response = dashboard(axum::extract::State(state)).await;
+        let body = response_into_string(response).await;
+        assert!(body.contains("仪表盘"), "the nav renders Chinese: {body}");
+        assert!(body.contains("注册表条目"), "the cards render Chinese");
+        assert!(
+            body.contains("仅回环") || body.contains("健康"),
+            "the matrix badges"
+        );
+        // The en fallback: an en manifest keeps today's byte-stable chrome.
+        let en = state_with(&manifest_yaml());
+        let en_body = response_into_string(dashboard(axum::extract::State(en)).await).await;
+        assert!(en_body.contains("Dashboard") && en_body.contains("Registry items"));
+
+        // The login page speaks the locale too.
+        let zh_state = state_with(&zh);
+        let login = login_page(axum::extract::State(zh_state)).await;
+        let login_body = response_into_string(login).await;
+        assert!(login_body.contains("登录"), "{login_body}");
+        assert!(login_body.contains("管理员令牌"), "{login_body}");
     }
 
     #[tokio::test]

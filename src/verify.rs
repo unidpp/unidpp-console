@@ -11,17 +11,20 @@ use crate::html::esc;
 use crate::{http, AppState};
 
 /// The verification form (POSTs back here).
-pub async fn form_html(issuer_port: u16) -> String {
+pub async fn form_html(issuer_port: u16, locale: &str) -> String {
     let port = issuer_port;
+    let verify_btn = crate::i18n::t(locale, "btn.verify");
     format!(
         r#"<h2>Verify a pack</h2>
 <p>Paste a pack (hex) — verification runs the CLI pipeline against the
 issuer's published anchors:</p>
 <form method="post" action="/passports">
   <textarea name="pack" spellcheck="false" style="min-height:7rem" aria-label="pack hex"></textarea>
-  <button type="submit">Verify</button>
+  <button type="submit">{verify_btn}</button>
 </form>
-<p class="note">Anchors: <code>GET http://127.0.0.1:{port}/keyring</code></p>"#
+<p class="note">Anchors: <code>GET http://127.0.0.1:{port}/keyring</code></p>"#,
+        verify_btn = verify_btn,
+        port = port,
     )
 }
 
