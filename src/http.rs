@@ -8,6 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// A response from a loopback service.
+#[derive(Clone)]
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,

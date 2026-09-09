@@ -375,15 +375,21 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
             })
             .collect()
     });
-    // One fan-out: every service's /healthz probed concurrently —
-    // N down services cost one timeout, not N.
-    let targets: Vec<(Option<u16>, &str)> = declared
-        .iter()
-        .map(|(_, bind, _, _)| (http::port_of(bind), "/healthz"))
-        .collect();
+    // One fan-out, two probes per service: /healthz and the discovery
+    // doc (which build is live) — N down services cost one timeout.
+    let mut targets: Vec<(Option<u16>, &str)> = Vec::new();
+    for (_, bind, _, _) in &declared {
+        let port = http::port_of(bind);
+        targets.push((port, "/healthz"));
+        targets.push((port, "/"));
+    }
     let probes = http::get_all(&targets).await;
+    let paired: Vec<_> = probes
+        .chunks(2)
+        .map(|c| (c[0].clone(), c[1].clone()))
+        .collect();
     let mut services = Vec::new();
-    for ((name, bind, note, public), probe) in declared.iter().zip(probes) {
+    for ((name, bind, note, public), (probe, id_probe)) in declared.iter().zip(paired) {
         let loc = state.with_manifest(|m| m.branding.locale.clone());
         let health = match http::port_of(bind) {
             Some(_) => match probe {
@@ -412,12 +418,21 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         } else {
             format!(r#"<a href="{}">{}</a>"#, esc(public), esc(public))
         };
+        let version = id_probe
+            .and_then(|r| r.json())
+            .and_then(|d| {
+                d.get("version")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            })
+            .unwrap_or_else(|| "—".to_string());
         services.push(format!(
-            r#"<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+            r#"<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>"#,
             esc(name),
             esc(bind),
             esc(note),
             public_cell,
+            esc(&version),
             health
         ));
     }
@@ -447,7 +462,7 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
 {summary}
 {metrics}
 <h2>Services</h2>
-<table><tr><th>{svc}</th><th>{bind}</th><th>{role}</th><th>{public}</th><th>{health}</th></tr>
+<table><tr><th>{svc}</th><th>{bind}</th><th>{role}</th><th>{public}</th><th>{ver}</th><th>{health}</th></tr>
 {rows}</table>"#,
         title = i18n::t(&locale, "page.dashboard"),
         svc = i18n::t(&locale, "mx.service"),
@@ -455,6 +470,7 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         role = i18n::t(&locale, "mx.role"),
         public = i18n::t(&locale, "mx.public"),
         health = i18n::t(&locale, "mx.health"),
+        ver = i18n::t(&locale, "mx.version"),
         rows = services.join("\n"),
     );
     page_for(&state, "Dashboard", "dashboard", body)

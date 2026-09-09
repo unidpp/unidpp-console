@@ -35,6 +35,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("mx.role", "Role", "角色"),
     ("mx.public", "Public", "公网地址"),
     ("mx.health", "Health", "健康"),
+    ("mx.version", "Version", "版本"),
     ("mx.healthy", "healthy", "健康"),
     ("mx.loopback", "loopback", "仅回环"),
     ("mx.unreachable", "unreachable", "不可达"),
