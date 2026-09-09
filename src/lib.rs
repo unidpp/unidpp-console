@@ -254,6 +254,8 @@ async fn service_identity(State(state): State<Arc<AppState>>) -> Response {
     let body = state.with_manifest(|m| {
         serde_json::json!({
             "service": "unidpp-console",
+            "version": env!("CARGO_PKG_VERSION"),
+            "build_id": option_env!("UNIDPP_BUILD_ID").unwrap_or("dev"),
             "deployment": m.deployment.name,
             "profile": m.deployment.profile.as_str(),
             "product": m.branding.product_name,
