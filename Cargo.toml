@@ -21,3 +21,4 @@ sha2 = "0.10"
 
 [dev-dependencies]
 serde_yaml = "0.9"
+tower = { version = "0.5", features = ["util"] }

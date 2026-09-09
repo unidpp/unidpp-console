@@ -2111,6 +2111,129 @@ services:
         }
     }
 
+    // -- The HTTP contract: the real router, driven end to end ----
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt;
+
+    async fn body_of(response: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    fn request(method: &str, uri: &str, cookie: Option<&str>, form: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder().method(method).uri(uri);
+        if let Some(cookie) = cookie {
+            builder = builder.header("cookie", cookie);
+        }
+        if form.is_some() {
+            builder = builder.header("content-type", "application/x-www-form-urlencoded");
+        }
+        builder
+            .body(Body::from(form.unwrap_or("").to_string()))
+            .expect("request")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_http_contract_login_gates_and_logout_revoke() {
+        let state = state_with(&manifest_yaml());
+        let app = router(state.clone());
+
+        // Public pages render without a session.
+        for uri in ["/", "/trust", "/branding", "/registry", "/passports"] {
+            let resp = app
+                .clone()
+                .oneshot(request("GET", uri, None, None))
+                .await
+                .expect("route");
+            assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        }
+
+        // Anonymous mutation: refused (the config save renders the
+        // gated page, not a write).
+        let resp = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/config",
+                None,
+                Some("manifest=api_version%3A+unidpp.org%2Fv1"),
+            ))
+            .await
+            .expect("route");
+        let body = body_of(resp).await;
+        assert!(body.contains("signed-in session"), "{body}");
+
+        // Login: wrong token renders the refusal; the right token
+        // redirects and sets the cookie.
+        let wrong = app
+            .clone()
+            .oneshot(request("POST", "/login", None, Some("token=nope")))
+            .await
+            .expect("route");
+        assert_eq!(wrong.status(), StatusCode::OK);
+        assert!(wrong.headers().get("set-cookie").is_none());
+
+        let right = app
+            .clone()
+            .oneshot(request("POST", "/login", None, Some("token=test-token")))
+            .await
+            .expect("route");
+        assert_eq!(right.status(), StatusCode::SEE_OTHER);
+        let cookie = right
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|c| c.split(';').next())
+            .expect("the session cookie")
+            .to_string();
+        assert!(cookie.starts_with("unidpp_console="), "{cookie}");
+
+        // The session unlocks the gated mutation path (the branding
+        // save reaches the handler and is validated by the model).
+        let saved = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/branding",
+                Some(&cookie),
+                Some("organization=Router+Test&product_name=P&logo=&primary=%231d4ed8&accent=%230e8345&legal_url=&contact_url="),
+            ))
+            .await
+            .expect("route");
+        let saved_body = body_of(saved).await;
+        assert!(saved_body.contains("saved and validated"), "{saved_body}");
+        assert_eq!(
+            state.with_manifest(|m| m.branding.organization.clone()),
+            "Router Test"
+        );
+
+        // Logout revokes server-side: the old cookie stops working.
+        let out = app
+            .clone()
+            .oneshot(request("POST", "/logout", Some(&cookie), None))
+            .await
+            .expect("route");
+        assert_eq!(out.status(), StatusCode::SEE_OTHER);
+        let after = app
+            .oneshot(request(
+                "POST",
+                "/config",
+                Some(&cookie),
+                Some("manifest=api_version%3A+unidpp.org%2Fv1"),
+            ))
+            .await
+            .expect("route");
+        let after_body = body_of(after).await;
+        assert!(
+            after_body.contains("signed-in session"),
+            "the revoked cookie must not authenticate: {after_body}"
+        );
+    }
+
     #[tokio::test]
     async fn trust_page_degrades_honestly_without_a_trust_service() {
         let state = state_with(&manifest_yaml()); // no trust block

@@ -1440,6 +1440,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tokio",
+ "tower",
  "unidpp-cli",
  "unidpp-config",
  "unidpp-model",
