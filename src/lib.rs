@@ -93,6 +93,125 @@ pub struct AppState {
     sessions: Mutex<HashMap<String, Instant>>,
 }
 
+// ---------------------------------------------------------------------------
+// SV-7 (the console half): tenant isolation at the manifest boundary.
+// A saved manifest may not reference state outside this deployment's
+// scope. A console running from `tenants/<me>/` confines its journals
+// to that subtree; the root console confines itself to non-tenant
+// paths (each tenant has its own console). Absolute paths and
+// traversal are refused outright, the resource named.
+// ---------------------------------------------------------------------------
+
+/// Every state-path field of a manifest, as (field, value) pairs.
+fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, String)> {
+    fn common(
+        out: &mut Vec<(&'static str, String)>,
+        name: &'static str,
+        service: Option<&unidpp_config::ServiceCommon>,
+    ) {
+        if let Some(state) = service.and_then(|s| s.state_file.as_deref()) {
+            out.push((name, state.to_string()));
+        }
+    }
+    let mut out = Vec::new();
+    common(
+        &mut out,
+        "services.registry.state_file",
+        manifest.services.registry.as_ref(),
+    );
+    common(
+        &mut out,
+        "services.trust.state_file",
+        manifest.services.trust.as_ref(),
+    );
+    if let Some(state) = manifest
+        .services
+        .log
+        .as_ref()
+        .and_then(|s| s.state_file.as_deref())
+    {
+        out.push(("services.log.state_file", state.to_string()));
+    }
+    if let Some(state) = manifest
+        .services
+        .issuer
+        .as_ref()
+        .and_then(|s| s.state_file.as_deref())
+    {
+        out.push(("services.issuer.state_file", state.to_string()));
+    }
+    common(
+        &mut out,
+        "services.projector.state_file",
+        manifest.services.projector.as_ref(),
+    );
+    common(
+        &mut out,
+        "services.archive.state_file",
+        manifest.services.archive.as_ref(),
+    );
+    if let Some(state) = manifest
+        .services
+        .resolver
+        .as_ref()
+        .and_then(|s| s.state_file.as_deref())
+    {
+        out.push(("services.resolver.state_file", state.to_string()));
+    }
+    out
+}
+
+/// This console's tenant scope: `Some("tenants/<me>/")` when the
+/// manifest lives under a tenants directory, `None` for the root
+/// console.
+fn tenant_scope(manifest_path: &Path) -> Option<String> {
+    let parent = manifest_path.parent()?;
+    let name = parent.file_name()?.to_str()?;
+    if parent.parent()?.file_name()?.to_str()? == "tenants" {
+        Some(format!("tenants/{name}/"))
+    } else {
+        None
+    }
+}
+
+/// The SV-7 refusal: every state path stays inside the scope.
+fn confine_state_paths(state: &AppState, manifest: &OperatorManifest) -> Result<(), String> {
+    let scope = tenant_scope(&state.config.manifest_path);
+    for (field, path) in state_paths(manifest) {
+        let refusal = |why: &str| {
+            Err(format!(
+                "cross-tenant refusal: `{field}` = `{path}` {why} — nothing was written"
+            ))
+        };
+        let is_absolute = Path::new(&path).is_absolute();
+        let traverses = path.split(['/']).any(|component| component == "..");
+        if is_absolute {
+            return refusal("is an absolute path outside the deployment tree");
+        }
+        if traverses {
+            return refusal("traverses outside the deployment tree");
+        }
+        match &scope {
+            Some(mine) => {
+                if !path.starts_with(mine.as_str()) {
+                    return refusal(&format!(
+                        "names state outside this tenant's subtree (`{mine}`)"
+                    ));
+                }
+            }
+            None => {
+                if path.starts_with("tenants/") {
+                    return refusal(
+                        "names a tenant's state — tenants have their own consoles; \
+                         the root console does not touch their journals",
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl AppState {
     pub fn new(config: Config) -> Result<AppState, String> {
         let text = std::fs::read_to_string(&config.manifest_path).map_err(|e| {
@@ -123,6 +242,7 @@ impl AppState {
 
     fn save_manifest(&self, text: &str) -> Result<OperatorManifest, String> {
         let manifest = load_manifest(text).map_err(|e| e.to_string())?;
+        confine_state_paths(self, &manifest)?;
         // Atomic replace: a failed write never truncates the live one.
         let tmp = self.config.manifest_path.with_extension("yaml.tmp");
         std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
@@ -1315,7 +1435,7 @@ sovereignty:
     yaml
 }
 
-#[derive(Deserialize, Default, Clone)]
+#[derive(Deserialize, Default, Clone, serde::Serialize)]
 struct TenantForm {
     name: String,
     organization: String,
@@ -1384,7 +1504,7 @@ console never starts processes.</p>
 async fn tenants_create(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Form(form): Form<TenantForm>,
+    axum::extract::RawForm(bytes): axum::extract::RawForm,
 ) -> Response {
     if !state.session_valid(&headers) {
         return page_for(
@@ -1396,6 +1516,19 @@ session. <a href="/login">Sign in</a>.</div><a href="/tenants">← back</a>"#
                 .to_string(),
         );
     }
+    // The checkboxes post one `suites` key per box — a sequence.
+    // axum's Form (serde_urlencoded) cannot read repeated keys, so
+    // the tenant form parses through serde_html_form.
+    let form: TenantForm = match serde_html_form::from_bytes(&bytes) {
+        Ok(form) => form,
+        Err(error) => {
+            return tenant_error(
+                &state,
+                &format!("the form did not parse: {error}"),
+                &TenantForm::default(),
+            );
+        }
+    };
     let name_ok = !form.name.is_empty()
         && form
             .name
@@ -2770,7 +2903,7 @@ services:
         let created = tenants_create(
             axum::extract::State(state.clone()),
             headers.clone(),
-            Form(form.clone()),
+            axum::extract::RawForm(serde_html_form::to_string(&form).unwrap().into()),
         )
         .await;
         let body = response_into_string(created).await;
@@ -2783,7 +2916,12 @@ services:
         assert!(written.contains("pack_suites: [ecdsa-p256, sm2]"));
 
         // Duplicate: refused.
-        let dup = tenants_create(axum::extract::State(state.clone()), headers, Form(form)).await;
+        let dup = tenants_create(
+            axum::extract::State(state.clone()),
+            headers,
+            axum::extract::RawForm(serde_html_form::to_string(&form).unwrap().into()),
+        )
+        .await;
         let body = response_into_string(dup).await;
         assert!(body.contains("already exists"), "{body}");
 
@@ -2805,7 +2943,12 @@ services:
             "cookie",
             format!("unidpp_console={session2}").parse().unwrap(),
         );
-        let refused = tenants_create(axum::extract::State(state.clone()), h2, Form(bad)).await;
+        let refused = tenants_create(
+            axum::extract::State(state.clone()),
+            h2,
+            axum::extract::RawForm(serde_html_form::to_string(&bad).unwrap().into()),
+        )
+        .await;
         let body = response_into_string(refused).await;
         assert!(body.contains("#rrggbb"), "{body}");
     }
