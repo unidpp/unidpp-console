@@ -20,6 +20,12 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
         "互操作声明",
     ),
     ("page.coverage", "Coverage", "覆盖范围"),
+    ("nav.carrier", "Carrier", "载体"),
+    ("nav.profiles", "Profiles", "轮廓"),
+    ("nav.archival", "Archival", "归档"),
+    ("page.carrier", "Carrier", "载体"),
+    ("page.profiles", "Profiles", "轮廓"),
+    ("page.archival", "Archival", "归档"),
     // footer / chrome
     ("foot.deployment", "deployment", "部署"),
     ("foot.legal", "legal", "法律"),

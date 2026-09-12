@@ -25,18 +25,41 @@ impl HttpResponse {
 /// is a miss the caller renders as "unreachable" — the console never
 /// lets one down service blank the dashboard.
 pub async fn get(port: u16, path: &str) -> Option<HttpResponse> {
-    request(port, "GET", path, None).await
+    request(port, "GET", path, None, None).await
 }
 
-async fn request(port: u16, method: &str, path: &str, body: Option<&str>) -> Option<HttpResponse> {
+/// POST a JSON body — the write-side sibling of `get` (the carrier
+/// mint needs no credential; the issuer's pack endpoint is open to
+/// the operator network).
+pub async fn post(port: u16, path: &str, body: &str) -> Option<HttpResponse> {
+    request(port, "POST", path, None, Some(body)).await
+}
+
+/// POST with a bearer credential (the registry and archive intakes
+/// are admin-scoped operator actions; the console submits the token
+/// the operator supplies and never stores one).
+pub async fn post_bearer(port: u16, path: &str, body: &str, token: &str) -> Option<HttpResponse> {
+    request(port, "POST", path, Some(token), Some(body)).await
+}
+
+async fn request(
+    port: u16,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: Option<&str>,
+) -> Option<HttpResponse> {
     let timeout = Duration::from_secs(2);
     let mut stream = tokio::time::timeout(timeout, TcpStream::connect(("127.0.0.1", port)))
         .await
         .ok()?
         .ok()?;
     let body = body.unwrap_or("");
+    let auth = bearer
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
     let head = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n\
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );

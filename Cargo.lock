@@ -1413,8 +1413,11 @@ dependencies = [
  "serde",
  "serde_json",
  "unidpp-demo",
+ "unidpp-dppr",
  "unidpp-event",
+ "unidpp-grid",
  "unidpp-model",
+ "unidpp-s13",
  "unidpp-signatif",
  "unidpp-tier-a",
  "unidpp-verdict",
@@ -1460,6 +1463,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "unidpp-dppr"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unidpp-grid",
+ "unidpp-model",
+]
+
+[[package]]
 name = "unidpp-event"
 version = "0.1.0"
 dependencies = [
@@ -1470,11 +1483,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "unidpp-grid"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "unidpp-model",
+]
+
+[[package]]
 name = "unidpp-model"
 version = "0.1.0"
 dependencies = [
  "serde",
  "sha2",
+]
+
+[[package]]
+name = "unidpp-s13"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unidpp-grid",
+ "unidpp-model",
 ]
 
 [[package]]
@@ -1492,7 +1523,9 @@ dependencies = [
  "sha2",
  "sm2",
  "unidpp-event",
+ "unidpp-grid",
  "unidpp-model",
+ "unidpp-s13",
  "unidpp-transform",
  "unidpp-verdict",
  "x25519-dalek",

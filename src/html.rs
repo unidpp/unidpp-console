@@ -106,6 +106,9 @@ fn nav_html(active: &str, locale: &str) -> String {
         ("passports", "/passports"),
         ("declarations", "/declarations"),
         ("coverage", "/coverage"),
+        ("carrier", "/carrier"),
+        ("profiles", "/profiles"),
+        ("archival", "/archival"),
         ("trust", "/trust"),
         ("branding", "/branding"),
     ];
