@@ -104,6 +104,9 @@ fn nav_html(active: &str, locale: &str) -> String {
         ("config", "/config"),
         ("registry", "/registry"),
         ("passports", "/passports"),
+        ("declarations", "/declarations"),
+        ("coverage", "/coverage"),
+        ("trust", "/trust"),
         ("branding", "/branding"),
     ];
     ITEMS

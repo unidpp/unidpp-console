@@ -1827,6 +1827,177 @@ restore until it is understood.</div><pre>{}</pre>
 // Router + run
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Declarations (FW-5): the interop-declaration management surface —
+// the registry's declaration-class items, listed and filtered. The
+// console is a surface: every capability is the registry's own API.
+// ---------------------------------------------------------------------------
+
+async fn declarations_page(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    let register = params.get("register").cloned().unwrap_or_default();
+    let page: usize = params
+        .get("page")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let body = match declarations_render(&state, &register, page).await {
+        Ok(body) => body,
+        Err(error) => format!(r#"<div class="error">{}</div>"#, esc(&error)),
+    };
+    page_for(&state, "Interop declarations", "declarations", body)
+}
+
+async fn declarations_render(
+    state: &Arc<AppState>,
+    register: &str,
+    page: usize,
+) -> Result<String, String> {
+    let port = state
+        .with_manifest(|m| {
+            m.services
+                .registry
+                .as_ref()
+                .and_then(|s| http::port_of(&s.bind))
+        })
+        .ok_or("this deployment declares no registry service")?;
+    let mut path = format!(
+        "/items?limit=50&offset={}&class=declaration",
+        (page - 1) * 50
+    );
+    if !register.is_empty() {
+        path.push_str(&format!("&register={register}"));
+    }
+    let response = http::get(port, &path)
+        .await
+        .ok_or("the registry service is unreachable".to_string())?;
+    let doc = response
+        .json()
+        .ok_or("the registry returned a non-JSON body".to_string())?;
+    let count = doc.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+    let mut rows = Vec::new();
+    for item in doc
+        .get("items")
+        .and_then(|i| i.as_array())
+        .unwrap_or(&vec![])
+    {
+        let id = item
+            .get("identifier")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let reg = item.get("register").and_then(|v| v.as_str()).unwrap_or("");
+        let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        rows.push(format!(
+            r#"<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>"#,
+            esc(id),
+            esc(reg),
+            esc(status)
+        ));
+    }
+    Ok(format!(
+        r#"<h2>Interop declarations</h2>
+<p>The signed, versioned posture each scheme publishes — per counterpart
+and data class: harmonization level, recognition mode, transports
+offered. Managed as registry items of the <code>declaration</code> class;
+listed from the registry's own API.</p>
+<table class="data"><thead><tr><th>Declaration</th><th>Register</th><th>Status</th></tr></thead>
+<tbody>{}</tbody></table>
+<p class="meta">{} item(s)</p>"#,
+        rows.join("\n"),
+        count
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Coverage (FW-5): the route/coverage visualization surface — the
+// projector's view of one passport, its coverage report rendered.
+// ---------------------------------------------------------------------------
+
+async fn coverage_page(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    let passport = params.get("passport").cloned().unwrap_or_default();
+    let profile = params.get("profile").cloned().unwrap_or_default();
+    let body = match coverage_render(&state, &passport, &profile).await {
+        Ok(body) => body,
+        Err(error) => format!(r#"<div class="error">{}</div>"#, esc(&error)),
+    };
+    page_for(&state, "Coverage", "coverage", body)
+}
+
+async fn coverage_render(
+    state: &Arc<AppState>,
+    passport: &str,
+    profile: &str,
+) -> Result<String, String> {
+    if passport.is_empty() || profile.is_empty() {
+        return Ok(r#"<h2>Coverage</h2>
+<p>Enter a passport identifier and a profile item to see the projector's
+view — the selected elements, the coverage report (what the profile
+saw, what it did not, and why), and the per-element trust markers.</p>
+<form method="get" action="/coverage" style="display:flex;gap:.6rem;flex-wrap:wrap">
+  <input name="passport" placeholder="urn:unidpp:passport:…" style="flex:1;min-width:16rem" required>
+  <input name="profile" placeholder="urn:unidpp:profile:…" style="flex:1;min-width:16rem" required>
+  <button type="submit">View</button>
+</form>"#
+            .into());
+    }
+    let port = state
+        .with_manifest(|m| {
+            m.services
+                .projector
+                .as_ref()
+                .and_then(|s| http::port_of(&s.bind))
+        })
+        .ok_or("this deployment declares no projector service".to_string())?;
+    let path = format!(
+        "/view?passport={}&profile={}&actor=console",
+        urlencode(passport),
+        urlencode(profile)
+    );
+    let response = http::get(port, &path)
+        .await
+        .ok_or("the projector service is unreachable".to_string())?;
+    let doc = response
+        .json()
+        .ok_or("the projector returned a non-JSON body".to_string())?;
+    let mut entries = Vec::new();
+    if let Some(report) = doc.get("coverage").and_then(|c| c.as_object()) {
+        if let Some(items) = report.get("entries").and_then(|e| e.as_array()) {
+            for entry in items {
+                let class = entry.get("class").and_then(|v| v.as_str()).unwrap_or("—");
+                let evidence = entry
+                    .get("evidence")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("—");
+                let policy = entry
+                    .get("governing_policy")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("—");
+                entries.push(format!(
+                    r#"<tr><td><code>{}</code></td><td>{}</td><td><code>{}</code></td></tr>"#,
+                    esc(class),
+                    esc(evidence),
+                    esc(policy)
+                ));
+            }
+        }
+    }
+    Ok(format!(
+        r#"<h2>Coverage — {}</h2>
+<p>The projector's view under <code>{}</code>: the coverage report
+names, per class, the evidence kind and the governing policy.</p>
+<table class="data"><thead><tr><th>Class</th><th>Evidence</th><th>Governing policy</th></tr></thead>
+<tbody>{}</tbody></table>"#,
+        esc(passport),
+        esc(profile),
+        entries.join("\n")
+    ))
+}
+
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
@@ -1840,6 +2011,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/passports", get(passports_page).post(verify::submit))
         .route("/branding", get(branding_preview).post(branding_save))
         .route("/trust", get(trust_page))
+        .route("/declarations", get(declarations_page))
+        .route("/coverage", get(coverage_page))
         .route("/egress", get(egress_page))
         .route("/tenants", get(tenants_page).post(tenants_create))
         .route("/backups", get(backups_page).post(backups_run))
@@ -2142,8 +2315,17 @@ services:
         let state = state_with(&manifest_yaml());
         let app = router(state.clone());
 
-        // Public pages render without a session.
-        for uri in ["/", "/trust", "/branding", "/registry", "/passports"] {
+        // Public pages render without a session — the two FW-5
+        // journey surfaces included.
+        for uri in [
+            "/",
+            "/trust",
+            "/branding",
+            "/registry",
+            "/passports",
+            "/declarations",
+            "/coverage",
+        ] {
             let resp = app
                 .clone()
                 .oneshot(request("GET", uri, None, None))

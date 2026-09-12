@@ -12,6 +12,14 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("nav.passports", "Passports", "护照"),
     ("nav.branding", "Branding", "品牌设定"),
     ("nav.trust", "Trust", "信任"),
+    ("nav.declarations", "Declarations", "互操作声明"),
+    ("nav.coverage", "Coverage", "覆盖范围"),
+    (
+        "page.interop declarations",
+        "Interop declarations",
+        "互操作声明",
+    ),
+    ("page.coverage", "Coverage", "覆盖范围"),
     // footer / chrome
     ("foot.deployment", "deployment", "部署"),
     ("foot.legal", "legal", "法律"),
