@@ -211,6 +211,22 @@ pub(crate) fn service_bind_note(m: &OperatorManifest, name: &str) -> (String, St
                 .unwrap_or_default(),
             "this console".to_string(),
         ),
+        "resolver" => (
+            services
+                .resolver
+                .as_ref()
+                .map(|s| s.bind.clone())
+                .unwrap_or_default(),
+            "RFC 9264 linkset resolver".to_string(),
+        ),
+        "hub" => (
+            services
+                .hub
+                .as_ref()
+                .map(|s| s.bind.clone())
+                .unwrap_or_default(),
+            "translation hub (stateless relay)".to_string(),
+        ),
         other => (String::new(), other.to_string()),
     }
 }
