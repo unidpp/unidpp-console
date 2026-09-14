@@ -369,6 +369,93 @@ mod tests {
     use super::*;
     use axum::extract::Form;
 
+    /// i18n integrity: every statically reachable lookup key
+    /// resolves in the table, and every table key is reachable — a
+    /// missed key renders blank on a page (the bug this test was
+    /// born from: page.config and page.declarations were absent);
+    /// a dead key is drift.
+    #[test]
+    fn every_i18n_key_resolves_and_none_is_dead() {
+        let table: std::collections::BTreeSet<&'static str> =
+            i18n::STRINGS.iter().map(|(k, _, _)| *k).collect();
+        let sources = [
+            include_str!("html.rs").to_string(),
+            include_str!("verify.rs").to_string(),
+            include_str!("journeys.rs").to_string(),
+            std::fs::read_to_string("src/pages/dashboard.rs").unwrap(),
+            std::fs::read_to_string("src/pages/session.rs").unwrap(),
+            std::fs::read_to_string("src/pages/config.rs").unwrap(),
+            std::fs::read_to_string("src/pages/registry.rs").unwrap(),
+            std::fs::read_to_string("src/pages/passports.rs").unwrap(),
+            std::fs::read_to_string("src/pages/branding.rs").unwrap(),
+            std::fs::read_to_string("src/pages/tenants.rs").unwrap(),
+            std::fs::read_to_string("src/pages/trust.rs").unwrap(),
+            std::fs::read_to_string("src/pages/backups.rs").unwrap(),
+            std::fs::read_to_string("src/pages/egress.rs").unwrap(),
+        ]
+        .concat();
+
+        // Reachability, two tiers:
+        // 1. every string literal in the sources that matches a
+        //    table key (call sites, loops, matches — any reference);
+        // 2. the constructed families (nav.<item>, page.<active>)
+        //    must exist — a constructed miss renders blank.
+        let mut reachable: std::collections::BTreeSet<String> = Default::default();
+        for key in &table {
+            let needle = format!("\"{key}\"");
+            if sources.contains(&needle) {
+                reachable.insert((*key).to_string());
+            }
+        }
+        for key in html::nav_keys() {
+            reachable.insert(format!("nav.{key}"));
+        }
+        for active in [
+            "dashboard",
+            "config",
+            "registry",
+            "passports",
+            "declarations",
+            "coverage",
+            "carrier",
+            "profiles",
+            "archival",
+            "trust",
+            "branding",
+            "tenants",
+            "backups",
+            "egress",
+        ] {
+            reachable.insert(format!("page.{active}"));
+        }
+
+        // The constructed families must resolve in the table — the
+        // blank-render bug class.
+        let unresolved: Vec<String> = reachable
+            .iter()
+            .filter(|k| k.starts_with("nav.") || k.starts_with("page."))
+            .filter(|k| !table.contains(k.as_str()))
+            .cloned()
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "constructed lookup keys missing from the table (they render blank): {unresolved:?}"
+        );
+        // And nothing in the table is unreferenced — drift.
+        let dead: Vec<&str> = table
+            .iter()
+            .filter(|k| {
+                let owned = k.to_string();
+                !reachable.contains(&owned)
+            })
+            .copied()
+            .collect();
+        assert!(
+            dead.is_empty(),
+            "table keys nothing looks up (drift): {dead:?}"
+        );
+    }
+
     fn manifest_yaml() -> String {
         r#"api_version: unidpp.org/v1
 deployment:

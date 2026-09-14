@@ -98,20 +98,29 @@ fn footer_html(branding: &Branding) -> String {
     }
 }
 
+/// The nav items (key, href) at module scope, so the i18n
+/// integrity test can enumerate the rendered keys.
+const ITEMS: &[(&str, &str)] = &[
+    ("dashboard", "/"),
+    ("config", "/config"),
+    ("registry", "/registry"),
+    ("passports", "/passports"),
+    ("declarations", "/declarations"),
+    ("coverage", "/coverage"),
+    ("carrier", "/carrier"),
+    ("profiles", "/profiles"),
+    ("archival", "/archival"),
+    ("trust", "/trust"),
+    ("branding", "/branding"),
+];
+
+/// The nav item keys (for the i18n integrity test).
+#[cfg(test)]
+pub(crate) fn nav_keys() -> Vec<&'static str> {
+    ITEMS.iter().map(|(key, _): &(&str, &str)| *key).collect()
+}
+
 fn nav_html(active: &str, locale: &str) -> String {
-    const ITEMS: &[(&str, &str)] = &[
-        ("dashboard", "/"),
-        ("config", "/config"),
-        ("registry", "/registry"),
-        ("passports", "/passports"),
-        ("declarations", "/declarations"),
-        ("coverage", "/coverage"),
-        ("carrier", "/carrier"),
-        ("profiles", "/profiles"),
-        ("archival", "/archival"),
-        ("trust", "/trust"),
-        ("branding", "/branding"),
-    ];
     ITEMS
         .iter()
         .map(|(key, href)| {

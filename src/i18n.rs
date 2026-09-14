@@ -14,11 +14,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("nav.trust", "Trust", "信任"),
     ("nav.declarations", "Declarations", "互操作声明"),
     ("nav.coverage", "Coverage", "覆盖范围"),
-    (
-        "page.interop declarations",
-        "Interop declarations",
-        "互操作声明",
-    ),
+    ("page.declarations", "Interop declarations", "互操作声明"),
     ("page.coverage", "Coverage", "覆盖范围"),
     ("nav.carrier", "Carrier", "载体"),
     ("nav.profiles", "Profiles", "轮廓"),
@@ -56,7 +52,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("mx.no_bind", "no bind", "无监听"),
     // page titles (page_for maps its known titles through these)
     ("page.dashboard", "Dashboard", "仪表盘"),
-    ("page.configuration", "Configuration", "配置"),
+    ("page.config", "Configuration", "配置"),
     ("page.registry", "Registry", "注册表"),
     ("page.passports", "Passports", "护照"),
     ("page.branding", "Branding", "品牌设定"),
@@ -67,9 +63,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     // common buttons
     ("btn.backup", "Back up this deployment", "备份整个部署"),
     ("btn.drill", "Run a restore drill", "运行恢复演练"),
-    ("btn.save_branding", "Save branding", "保存品牌设定"),
     ("btn.verify", "Verify", "验证"),
-    ("btn.lookup", "Look up", "查询"),
 ];
 
 /// The localized string for `key` under `locale` (the manifest's
