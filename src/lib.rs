@@ -235,7 +235,10 @@ fn redirect(location: &str) -> Response {
 fn page_for(state: &AppState, title: &str, active: &str, body: String) -> Response {
     let full = state.with_manifest(|m| {
         let locale = m.branding.locale.clone();
-        let localized = i18n::t(&locale, &format!("page.{}", title.to_lowercase()));
+        // The lookup key derives from the page's stable identifier
+        // (its active key), never from a display string — a title
+        // rename must never change what is looked up.
+        let localized = i18n::t(&locale, &format!("page.{active}"));
         let shown = if localized.is_empty() {
             title
         } else {
@@ -368,6 +371,26 @@ pub async fn run(config: Config) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use axum::extract::Form;
+
+    /// The localized title derives from the page's IDENTIFIER, not
+    /// its display string — a zh-CN manifest renders 配置 for /config
+    /// (the bug: the key once derived from the English title, so a
+    /// table rename silently dropped the localization to fallback).
+    #[tokio::test]
+    async fn the_localized_title_follows_the_active_key() {
+        let yaml = manifest_yaml().replace(
+            "  product_name: Example DPP",
+            "  product_name: Example DPP\n  locale: zh-CN",
+        );
+        let state = state_with(&yaml);
+        let response = pages::config::config_page(axum::extract::State(state.clone())).await;
+        let body = body_of(response).await;
+        assert!(
+            body.contains("<title>配置"),
+            "the zh-CN config title must render through page.<active>: first 200 chars: {}",
+            &body[..body.len().min(200)]
+        );
+    }
 
     /// i18n integrity: every statically reachable lookup key
     /// resolves in the table, and every table key is reachable — a
