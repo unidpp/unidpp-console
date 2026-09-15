@@ -433,23 +433,26 @@ mod tests {
         for key in html::nav_keys() {
             reachable.insert(format!("nav.{key}"));
         }
-        for active in [
-            "dashboard",
-            "config",
-            "registry",
-            "passports",
-            "declarations",
-            "coverage",
-            "carrier",
-            "profiles",
-            "archival",
-            "trust",
-            "branding",
-            "tenants",
-            "backups",
-            "egress",
-        ] {
-            reachable.insert(format!("page.{active}"));
+        // The page actives derive from the page_for call sites
+        // (every `page_for(&state, "…", "active"` — the second
+        // string literal, the page's stable identifier), never from
+        // a hand list: a new page joins the check by existing.
+        for call in sources.split("page_for(").skip(1) {
+            let mut rest = call;
+            let mut active = None;
+            for _ in 0..2 {
+                let Some(q1) = rest.find('"') else { break };
+                let after = &rest[q1 + 1..];
+                let Some(q2) = after.find('"') else { break };
+                active = Some(rest[q1 + 1..q1 + 1 + q2].to_string());
+                rest = &rest[q1 + 1 + q2 + 1..];
+            }
+            if let Some(active) = active {
+                if active.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                    reachable.insert(format!("page.{active}"));
+                }
+            }
+        }
         }
 
         // The constructed families must resolve in the table — the
