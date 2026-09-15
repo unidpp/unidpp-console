@@ -448,11 +448,11 @@ mod tests {
                 rest = &rest[q1 + 1 + q2 + 1..];
             }
             if let Some(active) = active {
-                if active.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                if !active.is_empty() && active.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                {
                     reachable.insert(format!("page.{active}"));
                 }
             }
-        }
         }
 
         // The constructed families must resolve in the table — the
