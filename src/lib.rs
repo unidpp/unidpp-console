@@ -402,23 +402,26 @@ mod tests {
     fn every_i18n_key_resolves_and_none_is_dead() {
         let table: std::collections::BTreeSet<&'static str> =
             i18n::STRINGS.iter().map(|(k, _, _)| *k).collect();
-        let sources = [
+        // The source set is DERIVED: the inline modules plus every
+        // file under src/pages/ found by reading the directory — a
+        // new page module joins the check by existing (TODO 226; the
+        // hand list this replaces was the 224 drift window).
+        let mut sources = [
             include_str!("html.rs").to_string(),
             include_str!("verify.rs").to_string(),
             include_str!("journeys.rs").to_string(),
-            std::fs::read_to_string("src/pages/dashboard.rs").unwrap(),
-            std::fs::read_to_string("src/pages/session.rs").unwrap(),
-            std::fs::read_to_string("src/pages/config.rs").unwrap(),
-            std::fs::read_to_string("src/pages/registry.rs").unwrap(),
-            std::fs::read_to_string("src/pages/passports.rs").unwrap(),
-            std::fs::read_to_string("src/pages/branding.rs").unwrap(),
-            std::fs::read_to_string("src/pages/tenants.rs").unwrap(),
-            std::fs::read_to_string("src/pages/trust.rs").unwrap(),
-            std::fs::read_to_string("src/pages/feedback.rs").unwrap(),
-            std::fs::read_to_string("src/pages/backups.rs").unwrap(),
-            std::fs::read_to_string("src/pages/egress.rs").unwrap(),
         ]
         .concat();
+        let mut page_files: Vec<std::path::PathBuf> = std::fs::read_dir("src/pages")
+            .expect("the pages directory lists")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+            .collect();
+        page_files.sort();
+        for path in &page_files {
+            sources.push_str(&std::fs::read_to_string(path).unwrap());
+        }
 
         // Reachability, two tiers:
         // 1. every string literal in the sources that matches a
