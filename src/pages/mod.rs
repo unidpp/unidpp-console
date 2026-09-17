@@ -7,6 +7,7 @@ pub(crate) mod branding;
 pub(crate) mod config;
 pub(crate) mod dashboard;
 pub(crate) mod egress;
+pub(crate) mod feedback;
 pub(crate) mod passports;
 pub(crate) mod registry;
 pub(crate) mod session;

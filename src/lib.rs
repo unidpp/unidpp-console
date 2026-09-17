@@ -327,6 +327,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(pages::branding::branding_preview).post(pages::branding::branding_save),
         )
         .route("/trust", get(pages::trust::trust_page))
+        .route("/feedback", get(pages::feedback::feedback_page))
         .route("/declarations", get(journeys::declarations_page))
         .route("/carrier", get(journeys::carrier_page))
         .route(
@@ -413,6 +414,7 @@ mod tests {
             std::fs::read_to_string("src/pages/branding.rs").unwrap(),
             std::fs::read_to_string("src/pages/tenants.rs").unwrap(),
             std::fs::read_to_string("src/pages/trust.rs").unwrap(),
+            std::fs::read_to_string("src/pages/feedback.rs").unwrap(),
             std::fs::read_to_string("src/pages/backups.rs").unwrap(),
             std::fs::read_to_string("src/pages/egress.rs").unwrap(),
         ]

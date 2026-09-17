@@ -42,6 +42,10 @@ pub async fn post_bearer(port: u16, path: &str, body: &str, token: &str) -> Opti
     request(port, "POST", path, Some(token), Some(body)).await
 }
 
+pub async fn get_bearer(port: u16, path: &str, token: &str) -> Option<HttpResponse> {
+    request(port, "GET", path, Some(token), None).await
+}
+
 async fn request(
     port: u16,
     method: &str,

@@ -111,6 +111,7 @@ const ITEMS: &[(&str, &str)] = &[
     ("profiles", "/profiles"),
     ("archival", "/archival"),
     ("trust", "/trust"),
+    ("feedback", "/feedback"),
     ("branding", "/branding"),
 ];
 

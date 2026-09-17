@@ -12,6 +12,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("nav.passports", "Passports", "护照"),
     ("nav.branding", "Branding", "品牌设定"),
     ("nav.trust", "Trust", "信任"),
+    ("nav.feedback", "Reports", "投诉"),
     ("nav.declarations", "Declarations", "互操作声明"),
     ("nav.coverage", "Coverage", "覆盖范围"),
     ("page.declarations", "Interop declarations", "互操作声明"),
@@ -59,6 +60,7 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("page.backups", "Backups", "备份"),
     ("page.tenants", "Tenants", "租户"),
     ("page.trust", "Trust", "信任"),
+    ("page.feedback", "Consumer reports", "消费者投诉"),
     ("page.egress", "Egress", "出站"),
     // common buttons
     ("btn.backup", "Back up this deployment", "备份整个部署"),
