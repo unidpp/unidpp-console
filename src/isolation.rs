@@ -17,25 +17,25 @@ use crate::AppState;
 
 /// Every state-path field of a manifest, as (field, value) pairs.
 pub(crate) fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, String)> {
-    fn common(
+    fn state(
         out: &mut Vec<(&'static str, String)>,
         name: &'static str,
-        service: Option<&unidpp_config::ServiceCommon>,
+        state_file: Option<&str>,
     ) {
-        if let Some(state) = service.and_then(|s| s.state_file.as_deref()) {
+        if let Some(state) = state_file {
             out.push((name, state.to_string()));
         }
     }
     let mut out = Vec::new();
-    common(
+    state(
         &mut out,
         "services.registry.state_file",
-        manifest.services.registry.as_ref(),
+        manifest.services.registry.as_ref().and_then(|s| s.state_file.as_deref()),
     );
-    common(
+    state(
         &mut out,
         "services.trust.state_file",
-        manifest.services.trust.as_ref(),
+        manifest.services.trust.as_ref().and_then(|s| s.state_file.as_deref()),
     );
     if let Some(state) = manifest
         .services
@@ -53,15 +53,15 @@ pub(crate) fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, Str
     {
         out.push(("services.issuer.state_file", state.to_string()));
     }
-    common(
+    state(
         &mut out,
         "services.projector.state_file",
-        manifest.services.projector.as_ref(),
+        manifest.services.projector.as_ref().and_then(|s| s.state_file.as_deref()),
     );
-    common(
+    state(
         &mut out,
         "services.archive.state_file",
-        manifest.services.archive.as_ref(),
+        manifest.services.archive.as_ref().and_then(|s| s.state_file.as_deref()),
     );
     if let Some(state) = manifest
         .services
