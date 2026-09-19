@@ -16,6 +16,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, AppState};
 
+/// The register browser over the registry service's items.
+#[utoipa::path(
+    get,
+    path = "/registry",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn registry_browser(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,

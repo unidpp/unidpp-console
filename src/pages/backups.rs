@@ -16,6 +16,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, AppState};
 
+/// The backups view: the bundle, its consistency point and the restore drills.
+#[utoipa::path(
+    get,
+    path = "/backups",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn backups_page(State(state): State<Arc<AppState>>) -> Response {
     let body = match backups_render(&state).await {
         Ok(body) => body,
@@ -154,6 +164,17 @@ consistency point. Restore is <code>unidpp-ops restore</code>.</p>
     ))
 }
 
+/// Run a backup operation.
+#[utoipa::path(
+    post,
+    path = "/backups",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The backup form: the operation to run"),
+    responses(
+        (status = 303, description = "Run: a redirect back to the view with the result stated"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn backups_run(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -198,6 +219,16 @@ pub(crate) async fn backups_run(
 
 /// POST /backups/drill — run the restore rehearsal through the
 /// operator script (session-gated; the script owns the logic).
+#[utoipa::path(
+    post,
+    path = "/backups/drill",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The drill form: the bundle to restore"),
+    responses(
+        (status = 303, description = "Drilled: a redirect back to the view with the drill report stated"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn backups_drill(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

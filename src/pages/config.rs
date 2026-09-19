@@ -18,6 +18,16 @@ use crate::verify;
 use crate::{page_for, AppState};
 use unidpp_config::render_env;
 
+/// The manifest editor: the deployment as data, secrets still ${VAR} references.
+#[utoipa::path(
+    get,
+    path = "/config",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn config_page(State(state): State<Arc<AppState>>) -> Response {
     let text = state.manifest_text();
     let body = format!(
@@ -52,6 +62,16 @@ manifest produces:</p>
     page_for(&state, "Configuration", "config", body)
 }
 
+/// The rendered environment of the deployment, resolved secrets sealed.
+#[utoipa::path(
+    get,
+    path = "/config/env",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn config_env(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -73,6 +93,17 @@ pub(crate) struct ConfigForm {
     pub(crate) manifest: String,
 }
 
+/// Save the edited manifest.
+#[utoipa::path(
+    post,
+    path = "/config",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The edited manifest text"),
+    responses(
+        (status = 303, description = "Saved: a redirect back to the editor"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn config_save(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

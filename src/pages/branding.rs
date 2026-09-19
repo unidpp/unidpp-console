@@ -71,6 +71,16 @@ pub(crate) struct BrandingForm {
 /// POST /branding — apply the form to the manifest's branding block
 /// through the validated save path; nothing else in the manifest is
 /// touched (the model is loaded, mutated, re-serialized).
+#[utoipa::path(
+    post,
+    path = "/branding",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The branding form: product name and locale"),
+    responses(
+        (status = 303, description = "Saved: a redirect back to the preview"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn branding_save(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -118,6 +128,16 @@ pub(crate) fn non_empty(raw: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// The branding preview: the manifest's identity rendered as the console chrome.
+#[utoipa::path(
+    get,
+    path = "/branding",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn branding_preview(State(state): State<Arc<AppState>>) -> Response {
     let body = state.with_manifest(|m| {
         let b = &m.branding;

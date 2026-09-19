@@ -19,6 +19,16 @@ use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 
+/// The declarations journey: the signed declarations and their state.
+#[utoipa::path(
+    get,
+    path = "/declarations",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn declarations_page(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -101,6 +111,16 @@ listed from the registry's own API.</p>
 // projector's view of one passport, its coverage report rendered.
 // ---------------------------------------------------------------------------
 
+/// The coverage view: the profile's coverage report.
+#[utoipa::path(
+    get,
+    path = "/coverage",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn coverage_page(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -212,6 +232,16 @@ fn json_or_refusal(
 
 // --- Carrier: mint the Tier-A pack, the QR budget shown ----------
 
+/// The carrier journey: carrier generation and translation.
+#[utoipa::path(
+    get,
+    path = "/carrier",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn carrier_page(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -382,6 +412,16 @@ fn capability_options(selected: &str) -> String {
     out
 }
 
+/// The profiles journey: profile intake and the registry's manifest schema.
+#[utoipa::path(
+    get,
+    path = "/profiles",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn profiles_page(State(state): State<Arc<AppState>>) -> Response {
     let body = match profiles_render(&state).await {
         Ok(body) => body,
@@ -464,6 +504,17 @@ satisfiability) runs there, and its findings are stated below.</p>
     ))
 }
 
+/// Intake a profile.
+#[utoipa::path(
+    post,
+    path = "/profiles",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The profile intake form: the manifest and its signature"),
+    responses(
+        (status = 303, description = "Intake accepted: a redirect back to the journey"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn profiles_intake(
     State(state): State<Arc<AppState>>,
     Form(f): Form<ProfileIntakeForm>,
@@ -591,6 +642,16 @@ pub(crate) struct SnapshotIntakeForm {
     token: String,
 }
 
+/// The archival journey: snapshots and their verification.
+#[utoipa::path(
+    get,
+    path = "/archival",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn archival_page(State(state): State<Arc<AppState>>) -> Response {
     let body = match archival_render(&state).await {
         Ok(body) => body,
@@ -676,6 +737,17 @@ state is being archived, the state hash and log head (each a
     ))
 }
 
+/// Intake a snapshot.
+#[utoipa::path(
+    post,
+    path = "/archival",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The archival intake form: the snapshot reference"),
+    responses(
+        (status = 303, description = "Intake accepted: a redirect back to the journey"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn archival_intake(
     State(state): State<Arc<AppState>>,
     Form(f): Form<SnapshotIntakeForm>,

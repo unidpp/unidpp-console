@@ -14,6 +14,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, AppState};
 
+/// The egress inventory: what leaves the deployment, sealed and real rows alike.
+#[utoipa::path(
+    get,
+    path = "/egress",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn egress_page(State(state): State<Arc<AppState>>) -> Response {
     let body = state.with_manifest(|m| {
         let sealed = m.sovereignty.external_calls == unidpp_config::EgressPolicy::None;

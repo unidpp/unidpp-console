@@ -34,6 +34,16 @@ pub struct VerifyForm {
 }
 
 /// POST /passports with a pack: verify through the pipeline.
+#[utoipa::path(
+    post,
+    path = "/passports",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The verification form: the pack reference and its anchors"),
+    responses(
+        (status = 303, description = "Verified: a redirect back to the form with the verdict stated"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub async fn submit(State(state): State<Arc<AppState>>, Form(form): Form<VerifyForm>) -> Response {
     let body = match verify_pack(&state, &form.pack).await {
         Ok(report) => report,

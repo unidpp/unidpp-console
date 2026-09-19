@@ -16,6 +16,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, AppState};
 
+/// The dashboard: the deployment's service cards and their readiness.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
     let declared: Vec<(String, String, String, String)> = state.with_manifest(|m| {
         m.service_names()

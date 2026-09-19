@@ -16,6 +16,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, urlencode, AppState};
 
+/// The verification form and its most recent verdicts.
+#[utoipa::path(
+    get,
+    path = "/passports",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn passports_page(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,

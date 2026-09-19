@@ -17,6 +17,16 @@ use crate::http;
 use crate::verify;
 use crate::{constant_time_eq, page_for, AppState, SESSION_LIFETIME};
 
+/// The login page.
+#[utoipa::path(
+    get,
+    path = "/login",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn login_page(State(state): State<Arc<AppState>>) -> Response {
     if state.config.admin_token.is_none() {
         return page_for(
@@ -51,6 +61,17 @@ pub(crate) struct LoginForm {
     pub(crate) token: String,
 }
 
+/// Submit the login form.
+#[utoipa::path(
+    post,
+    path = "/login",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The login form: the admin token"),
+    responses(
+        (status = 303, description = "Authenticated: a redirect to the dashboard with the session issued"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn login_submit(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LoginForm>,
@@ -87,6 +108,15 @@ pub(crate) async fn login_submit(
     response
 }
 
+/// End the session.
+#[utoipa::path(
+    post,
+    path = "/logout",
+    tag = "console",
+    responses(
+        (status = 303, description = "A redirect to the login page, the session ended"),
+    )
+)]
 pub(crate) async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if let Some(cookie) = headers
         .get("cookie")

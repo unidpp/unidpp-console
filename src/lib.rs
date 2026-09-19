@@ -33,8 +33,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
+use serde_json::json;
 use tokio::net::TcpListener;
 use unidpp_config::{load as load_manifest, OperatorManifest};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 mod html;
 mod http;
@@ -56,25 +59,41 @@ pub struct Config {
 }
 
 impl Config {
+    /// The environment variables this service consumes. This is the
+    /// deployment contract: unidpp-config renders exactly these names
+    /// for the console, and the contract document carries them as
+    /// `x-unidpp-env-keys`.
+    pub const ENV_KEYS: &'static [&'static str] = &[
+        "UNIDPP_CONSOLE_BIND",
+        "UNIDPP_CONSOLE_MANIFEST",
+        "UNIDPP_CONSOLE_ADMIN_TOKEN",
+    ];
+
     pub fn from_env() -> Result<Config, String> {
         let mut config = Config {
             bind: "127.0.0.1:8397".parse().expect("static bind"),
             manifest_path: PathBuf::from("unidpp-operator.yaml"),
             admin_token: None,
         };
-        if let Ok(bind) = std::env::var("UNIDPP_CONSOLE_BIND") {
+        let mut vars: HashMap<&str, String> = HashMap::new();
+        for key in Self::ENV_KEYS {
+            if let Ok(value) = std::env::var(key) {
+                vars.insert(*key, value);
+            }
+        }
+        if let Some(bind) = vars.get("UNIDPP_CONSOLE_BIND") {
             config.bind = bind
                 .parse()
                 .map_err(|_| format!("bad UNIDPP_CONSOLE_BIND `{bind}`"))?;
         }
-        if let Ok(path) = std::env::var("UNIDPP_CONSOLE_MANIFEST") {
+        if let Some(path) = vars.get("UNIDPP_CONSOLE_MANIFEST") {
             if !path.trim().is_empty() {
                 config.manifest_path = PathBuf::from(path);
             }
         }
-        if let Ok(token) = std::env::var("UNIDPP_CONSOLE_ADMIN_TOKEN") {
+        if let Some(token) = vars.get("UNIDPP_CONSOLE_ADMIN_TOKEN") {
             if !token.is_empty() {
-                config.admin_token = Some(token);
+                config.admin_token = Some(token.clone());
             }
         }
         Ok(config)
@@ -254,6 +273,14 @@ fn page_for(state: &AppState, title: &str, active: &str, body: String) -> Respon
 // ---------------------------------------------------------------------------
 
 /// The service identity (the orchestrator's probe reads it).
+#[utoipa::path(
+    get,
+    path = "/.well-known/unidpp-service",
+    tag = "console",
+    responses(
+        (status = 200, description = "The identity document: service, version, build id", body = Value, content_type = "application/json"),
+    )
+)]
 async fn service_identity(State(state): State<Arc<AppState>>) -> Response {
     let body = state.with_manifest(|m| {
         serde_json::json!({
@@ -272,6 +299,15 @@ async fn service_identity(State(state): State<Arc<AppState>>) -> Response {
         .expect("static response parts")
 }
 
+/// Liveness probe.
+#[utoipa::path(
+    get,
+    path = "/healthz",
+    tag = "console",
+    responses(
+        (status = 200, description = "The service is serving"),
+    )
+)]
 async fn healthz() -> Response {
     Response::builder()
         .status(StatusCode::OK)
@@ -304,55 +340,139 @@ fn futures_block<F: std::future::Future>(future: F) -> F::Output {
 /// save_manifest the text editor uses.
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/healthz", get(healthz))
-        .route("/.well-known/unidpp-service", get(service_identity))
-        .route("/", get(pages::dashboard::dashboard))
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
+        .route(paths::HEALTHZ, get(healthz))
+        .route(paths::SERVICE_IDENTITY, get(service_identity))
+        .route(paths::ROOT, get(pages::dashboard::dashboard))
         .route(
-            "/login",
+            paths::LOGIN,
             get(pages::session::login_page).post(pages::session::login_submit),
         )
-        .route("/logout", post(pages::session::logout))
+        .route(paths::LOGOUT, post(pages::session::logout))
         .route(
-            "/config",
+            paths::CONFIG,
             get(pages::config::config_page).post(pages::config::config_save),
         )
-        .route("/config/env", get(pages::config::config_env))
-        .route("/registry", get(pages::registry::registry_browser))
+        .route(paths::CONFIG_ENV, get(pages::config::config_env))
+        .route(paths::REGISTRY, get(pages::registry::registry_browser))
         .route(
-            "/passports",
+            paths::PASSPORTS,
             get(pages::passports::passports_page).post(verify::submit),
         )
         .route(
-            "/branding",
+            paths::BRANDING,
             get(pages::branding::branding_preview).post(pages::branding::branding_save),
         )
-        .route("/trust", get(pages::trust::trust_page))
-        .route("/feedback", get(pages::feedback::feedback_page))
-        .route("/declarations", get(journeys::declarations_page))
-        .route("/carrier", get(journeys::carrier_page))
+        .route(paths::TRUST, get(pages::trust::trust_page))
+        .route(paths::FEEDBACK, get(pages::feedback::feedback_page))
+        .route(paths::DECLARATIONS, get(journeys::declarations_page))
+        .route(paths::CARRIER, get(journeys::carrier_page))
         .route(
-            "/profiles",
+            paths::PROFILES,
             get(journeys::profiles_page).post(journeys::profiles_intake),
         )
         .route(
-            "/archival",
+            paths::ARCHIVAL,
             get(journeys::archival_page).post(journeys::archival_intake),
         )
-        .route("/coverage", get(journeys::coverage_page))
-        .route("/egress", get(pages::egress::egress_page))
+        .route(paths::COVERAGE, get(journeys::coverage_page))
+        .route(paths::EGRESS, get(pages::egress::egress_page))
         .route(
-            "/tenants",
+            paths::TENANTS,
             get(pages::tenants::tenants_page).post(pages::tenants::tenants_create),
         )
         .route(
-            "/backups",
+            paths::BACKUPS,
             get(pages::backups::backups_page).post(pages::backups::backups_run),
         )
-        .route("/backups/drill", post(pages::backups::backups_drill))
+        .route(paths::BACKUPS_DRILL, post(pages::backups::backups_drill))
+        .route(paths::CONTRACT_YAML, get(openapi_yaml))
         .with_state(state)
 }
 
-/// Run until stopped.
+// ---------------------------------------------------------------------------
+// Interface contract
+// ---------------------------------------------------------------------------
+
+/// The routed paths, declared once. The router routes by these
+/// constants, the contract document is tested against them, and no
+/// route may be declared with a raw literal (the gates enforce both).
+pub mod paths {
+    pub const HEALTHZ: &str = "/healthz";
+    pub const SERVICE_IDENTITY: &str = "/.well-known/unidpp-service";
+    pub const ROOT: &str = "/";
+    pub const LOGIN: &str = "/login";
+    pub const LOGOUT: &str = "/logout";
+    pub const CONFIG: &str = "/config";
+    pub const CONFIG_ENV: &str = "/config/env";
+    pub const REGISTRY: &str = "/registry";
+    pub const PASSPORTS: &str = "/passports";
+    pub const BRANDING: &str = "/branding";
+    pub const TRUST: &str = "/trust";
+    pub const FEEDBACK: &str = "/feedback";
+    pub const DECLARATIONS: &str = "/declarations";
+    pub const CARRIER: &str = "/carrier";
+    pub const PROFILES: &str = "/profiles";
+    pub const ARCHIVAL: &str = "/archival";
+    pub const COVERAGE: &str = "/coverage";
+    pub const EGRESS: &str = "/egress";
+    pub const TENANTS: &str = "/tenants";
+    pub const BACKUPS: &str = "/backups";
+    pub const BACKUPS_DRILL: &str = "/backups/drill";
+    /// The contract document itself (not an operation of the API).
+    pub const CONTRACT_YAML: &str = "/openapi.yaml";
+}
+
+/// The OpenAPI model: one declaration per handler
+/// (`#[utoipa::path]`, co-located in the page modules), from which
+/// the served contract, the golden file and Swagger UI all derive.
+/// The console is a session-gated HTML surface: pages answer
+/// `text/html`, forms answer a 303 redirect, and the session gate
+/// redirects an unauthenticated browser to `/login`.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "UniDPP console",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "The operator console: a session-gated HTML surface over the deployment manifest — dashboards, configuration, branding, tenants, backups, the trust and feedback views, and the adoption journeys. It holds no domain logic: it reads the manifest and proxies the services' own surfaces. Login requires the console admin token where one is configured.",
+        license(name = "Apache-2.0", identifier = "Apache-2.0"),
+    ),
+    paths(
+        healthz, service_identity,
+        pages::dashboard::dashboard,
+        pages::session::login_page, pages::session::login_submit, pages::session::logout,
+        pages::config::config_page, pages::config::config_save, pages::config::config_env,
+        pages::registry::registry_browser,
+        pages::passports::passports_page, verify::submit,
+        pages::branding::branding_preview, pages::branding::branding_save,
+        pages::trust::trust_page, pages::feedback::feedback_page,
+        journeys::declarations_page, journeys::carrier_page,
+        journeys::profiles_page, journeys::profiles_intake,
+        journeys::archival_page, journeys::archival_intake,
+        journeys::coverage_page, pages::egress::egress_page,
+        pages::tenants::tenants_page, pages::tenants::tenants_create,
+        pages::backups::backups_page, pages::backups::backups_run, pages::backups::backups_drill,
+    ),
+    tags(
+        (name = "console", description = "The session-gated operator surface"),
+    )
+)]
+struct ApiDoc;
+
+/// The contract document: the OpenAPI model plus the deployment keys
+/// (`x-unidpp-env-keys`). Served at `/openapi.yaml` and committed as
+/// the golden `openapi.yaml`.
+pub fn contract_yaml() -> String {
+    let mut doc = serde_json::to_value(ApiDoc::openapi()).expect("contract serializes");
+    doc["info"]["x-unidpp-env-keys"] = json!(Config::ENV_KEYS);
+    serde_yaml::to_string(&doc).expect("contract renders as YAML")
+}
+
+async fn openapi_yaml() -> Response {
+    html_response(contract_yaml())
+}
+
+/// Run until stopped (used by `main`).
 pub async fn run(config: Config) -> std::io::Result<()> {
     let bind = config.bind;
     let state = Arc::new(AppState::new(config).unwrap_or_else(|e| {
@@ -369,7 +489,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use axum::extract::Form;
 
@@ -487,7 +607,7 @@ mod tests {
         );
     }
 
-    fn manifest_yaml() -> String {
+    pub(crate) fn manifest_yaml() -> String {
         r#"api_version: unidpp.org/v1
 deployment:
   name: console-test
@@ -503,7 +623,7 @@ services:
         .to_string()
     }
 
-    fn state_with(manifest: &str) -> Arc<AppState> {
+    pub(crate) fn state_with(manifest: &str) -> Arc<AppState> {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir =
@@ -1124,5 +1244,158 @@ services:
             .and_then(|v| v.to_str().ok())
             .and_then(|c| c.split(';').next())
             .map(str::to_string)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Contract gates
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod contract_gates {
+    use super::*;
+    use crate::http::request_raw;
+    use serde_json::Value;
+
+    const VERBS: [&str; 5] = ["get", "post", "put", "delete", "patch"];
+
+    /// The contract paths with their documented methods.
+    fn documented() -> std::collections::BTreeMap<String, Vec<String>> {
+        let doc: Value = serde_yaml::from_str(&contract_yaml()).expect("contract parses");
+        doc["paths"]
+            .as_object()
+            .expect("paths object")
+            .iter()
+            .map(|(path, item)| {
+                let methods = VERBS
+                    .iter()
+                    .filter(|v| item.get(*v).is_some())
+                    .map(|v| v.to_string())
+                    .collect();
+                (path.clone(), methods)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_golden_matches_the_committed_contract() {
+        assert_eq!(contract_yaml(), include_str!("../openapi.yaml"));
+    }
+
+    #[test]
+    #[ignore = "regenerates openapi.yaml after a route change: cargo test contract_gates -- --ignored export"]
+    fn export_golden() {
+        std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/openapi.yaml"),
+            contract_yaml(),
+        )
+        .expect("golden written");
+    }
+
+    /// Every path the router serves (the contract route itself
+    /// carries no operation and is asserted separately).
+    fn routed_paths() -> Vec<&'static str> {
+        vec![
+            paths::HEALTHZ,
+            paths::SERVICE_IDENTITY,
+            paths::ROOT,
+            paths::LOGIN,
+            paths::LOGOUT,
+            paths::CONFIG,
+            paths::CONFIG_ENV,
+            paths::REGISTRY,
+            paths::PASSPORTS,
+            paths::BRANDING,
+            paths::TRUST,
+            paths::FEEDBACK,
+            paths::DECLARATIONS,
+            paths::CARRIER,
+            paths::PROFILES,
+            paths::ARCHIVAL,
+            paths::COVERAGE,
+            paths::EGRESS,
+            paths::TENANTS,
+            paths::BACKUPS,
+            paths::BACKUPS_DRILL,
+        ]
+    }
+
+    #[test]
+    fn every_routed_path_is_documented() {
+        let doc = documented();
+        for path in routed_paths() {
+            assert!(doc.contains_key(path), "routed but undocumented: {path}");
+        }
+    }
+
+    #[test]
+    fn every_documented_path_is_routed() {
+        let routed: std::collections::BTreeSet<String> =
+            routed_paths().into_iter().map(str::to_string).collect();
+        for path in documented().keys() {
+            assert!(routed.contains(path), "documented but not routed: {path}");
+        }
+    }
+
+    #[test]
+    fn routes_are_declared_by_constant_not_literal() {
+        let flat: String = include_str!("lib.rs")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut idx = 0;
+        while let Some(pos) = flat[idx..].find(".route(") {
+            let abs = idx + pos;
+            if abs > 0 && flat.as_bytes()[abs - 1] == b'"' {
+                idx = abs + 7;
+                continue;
+            }
+            let after = flat[abs + 7..].trim_start();
+            assert!(
+                after.starts_with("paths::"),
+                "route paths come from the paths:: constants: `{}`",
+                &flat[abs..(abs + 60).min(flat.len())]
+            );
+            idx = abs + 7;
+        }
+    }
+
+    /// The behavioral half: every documented operation answers
+    /// anything but 405, and every undocumented method on a documented
+    /// path answers 405 — on the live router.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_router_serves_the_contract_exactly() {
+        let state = crate::tests::state_with(&crate::tests::manifest_yaml());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("ephemeral bind");
+        let addr = listener.local_addr().expect("local addr");
+        let join = tokio::spawn(async move {
+            let _ = axum::serve(listener, router(state)).await;
+        });
+        for (path, methods) in documented() {
+            for verb in VERBS {
+                let resp = request_raw(
+                    addr.port(),
+                    &verb.to_uppercase(),
+                    &path,
+                    if verb == "get" { None } else { Some("") },
+                )
+                .await
+                .expect("probe answered");
+                if methods.contains(&verb.to_string()) {
+                    assert_ne!(
+                        resp.status, 405,
+                        "{verb} {path}: the contract says routed, the router says otherwise"
+                    );
+                } else {
+                    assert_eq!(
+                        resp.status, 405,
+                        "{verb} {path}: served but not in the contract"
+                    );
+                }
+            }
+        }
+        join.abort();
     }
 }

@@ -1,0 +1,497 @@
+components: {}
+info:
+  description: 'The operator console: a session-gated HTML surface over the deployment manifest — dashboards, configuration, branding, tenants, backups, the trust and feedback views, and the adoption journeys. It holds no domain logic: it reads the manifest and proxies the services'' own surfaces. Login requires the console admin token where one is configured.'
+  license:
+    identifier: Apache-2.0
+    name: Apache-2.0
+  title: UniDPP console
+  version: 0.1.0
+  x-unidpp-env-keys:
+  - UNIDPP_CONSOLE_BIND
+  - UNIDPP_CONSOLE_MANIFEST
+  - UNIDPP_CONSOLE_ADMIN_TOKEN
+openapi: 3.1.0
+paths:
+  /:
+    get:
+      operationId: dashboard
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The dashboard: the deployment''s service cards and their readiness.'
+      tags:
+      - console
+  /.well-known/unidpp-service:
+    get:
+      operationId: service_identity
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: 'The identity document: service, version, build id'
+      summary: The service identity (the orchestrator's probe reads it).
+      tags:
+      - console
+  /archival:
+    get:
+      operationId: archival_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The archival journey: snapshots and their verification.'
+      tags:
+      - console
+    post:
+      operationId: archival_intake
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The archival intake form: the snapshot reference'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Intake accepted: a redirect back to the journey'
+      summary: Intake a snapshot.
+      tags:
+      - console
+  /backups:
+    get:
+      operationId: backups_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The backups view: the bundle, its consistency point and the restore drills.'
+      tags:
+      - console
+    post:
+      operationId: backups_run
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The backup form: the operation to run'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Run: a redirect back to the view with the result stated'
+      summary: Run a backup operation.
+      tags:
+      - console
+  /backups/drill:
+    post:
+      operationId: backups_drill
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The drill form: the bundle to restore'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Drilled: a redirect back to the view with the drill report stated'
+      summary: |-
+        POST /backups/drill — run the restore rehearsal through the
+        operator script (session-gated; the script owns the logic).
+      tags:
+      - console
+  /branding:
+    get:
+      operationId: branding_preview
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The branding preview: the manifest''s identity rendered as the console chrome.'
+      tags:
+      - console
+    post:
+      operationId: branding_save
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The branding form: product name and locale'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Saved: a redirect back to the preview'
+      summary: |-
+        POST /branding — apply the form to the manifest's branding block
+        through the validated save path; nothing else in the manifest is
+        touched (the model is loaded, mutated, re-serialized).
+      tags:
+      - console
+  /carrier:
+    get:
+      operationId: carrier_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The carrier journey: carrier generation and translation.'
+      tags:
+      - console
+  /config:
+    get:
+      operationId: config_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The manifest editor: the deployment as data, secrets still ${VAR} references.'
+      tags:
+      - console
+    post:
+      operationId: config_save
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: The edited manifest text
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Saved: a redirect back to the editor'
+      summary: Save the edited manifest.
+      tags:
+      - console
+  /config/env:
+    get:
+      operationId: config_env
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: The rendered environment of the deployment, resolved secrets sealed.
+      tags:
+      - console
+  /coverage:
+    get:
+      operationId: coverage_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The coverage view: the profile''s coverage report.'
+      tags:
+      - console
+  /declarations:
+    get:
+      operationId: declarations_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The declarations journey: the signed declarations and their state.'
+      tags:
+      - console
+  /egress:
+    get:
+      operationId: egress_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The egress inventory: what leaves the deployment, sealed and real rows alike.'
+      tags:
+      - console
+  /feedback:
+    get:
+      operationId: feedback_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: The consumer-reports view over the gateway's report channel.
+      tags:
+      - console
+  /healthz:
+    get:
+      operationId: healthz
+      responses:
+        '200':
+          description: The service is serving
+      summary: Liveness probe.
+      tags:
+      - console
+  /login:
+    get:
+      operationId: login_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: The login page.
+      tags:
+      - console
+    post:
+      operationId: login_submit
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The login form: the admin token'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Authenticated: a redirect to the dashboard with the session issued'
+      summary: Submit the login form.
+      tags:
+      - console
+  /logout:
+    post:
+      operationId: logout
+      responses:
+        '303':
+          description: A redirect to the login page, the session ended
+      summary: End the session.
+      tags:
+      - console
+  /passports:
+    get:
+      operationId: passports_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: The verification form and its most recent verdicts.
+      tags:
+      - console
+    post:
+      operationId: submit
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The verification form: the pack reference and its anchors'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Verified: a redirect back to the form with the verdict stated'
+      summary: 'POST /passports with a pack: verify through the pipeline.'
+      tags:
+      - console
+  /profiles:
+    get:
+      operationId: profiles_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The profiles journey: profile intake and the registry''s manifest schema.'
+      tags:
+      - console
+    post:
+      operationId: profiles_intake
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The profile intake form: the manifest and its signature'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Intake accepted: a redirect back to the journey'
+      summary: Intake a profile.
+      tags:
+      - console
+  /registry:
+    get:
+      operationId: registry_browser
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: The register browser over the registry service's items.
+      tags:
+      - console
+  /tenants:
+    get:
+      operationId: tenants_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The tenants view: the whitelabel tenants of the deployment.'
+      tags:
+      - console
+    post:
+      operationId: tenants_create
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+        description: 'The tenant form: the tenant''s manifest'
+        required: true
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The form is re-rendered with its error stated
+        '303':
+          description: 'Created: a redirect back to the tenants view'
+      summary: Create a tenant.
+      tags:
+      - console
+  /trust:
+    get:
+      operationId: trust_page
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: The page, rendered against the deployment manifest
+        '303':
+          description: The session gate redirects an unauthenticated browser to `/login`
+      summary: 'The trust view: operators, trust markers and validity windows.'
+      tags:
+      - console
+tags:
+- description: The session-gated operator surface
+  name: console

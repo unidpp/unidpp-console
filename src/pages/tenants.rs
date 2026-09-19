@@ -97,6 +97,16 @@ pub(crate) struct TenantForm {
     pub(crate) base_port: u16,
 }
 
+/// The tenants view: the whitelabel tenants of the deployment.
+#[utoipa::path(
+    get,
+    path = "/tenants",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn tenants_page(State(state): State<Arc<AppState>>) -> Response {
     let existing: Vec<String> = list_tenants(&state);
     let listing = if existing.is_empty() {
@@ -150,6 +160,17 @@ console never starts processes.</p>
     page_for(&state, "Tenants", "tenants", body)
 }
 
+/// Create a tenant.
+#[utoipa::path(
+    post,
+    path = "/tenants",
+    tag = "console",
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "The tenant form: the tenant's manifest"),
+    responses(
+        (status = 303, description = "Created: a redirect back to the tenants view"),
+        (status = 200, description = "The form is re-rendered with its error stated", body = String, content_type = "text/html"),
+    )
+)]
 pub(crate) async fn tenants_create(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

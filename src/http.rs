@@ -46,6 +46,19 @@ pub async fn get_bearer(port: u16, path: &str, token: &str) -> Option<HttpRespon
     request(port, "GET", path, Some(token), None).await
 }
 
+/// The method-generic form, used by the contract gate's 405 sweep
+/// (every documented operation answers, every undocumented method
+/// answers 405).
+#[cfg(test)]
+pub async fn request_raw(
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Option<HttpResponse> {
+    request(port, method, path, None, body).await
+}
+
 async fn request(
     port: u16,
     method: &str,

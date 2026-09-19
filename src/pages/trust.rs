@@ -14,6 +14,16 @@ use crate::http;
 use crate::verify;
 use crate::{page_for, AppState};
 
+/// The trust view: operators, trust markers and validity windows.
+#[utoipa::path(
+    get,
+    path = "/trust",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn trust_page(State(state): State<Arc<AppState>>) -> Response {
     let body = match trust_render(&state).await {
         Ok(body) => body,

@@ -13,6 +13,16 @@ use crate::html::esc;
 use crate::http;
 use crate::{page_for, AppState};
 
+/// The consumer-reports view over the gateway's report channel.
+#[utoipa::path(
+    get,
+    path = "/feedback",
+    tag = "console",
+    responses(
+        (status = 200, description = "The page, rendered against the deployment manifest", body = String, content_type = "text/html"),
+        (status = 303, description = "The session gate redirects an unauthenticated browser to `/login`"),
+    )
+)]
 pub(crate) async fn feedback_page(State(state): State<Arc<AppState>>) -> Response {
     let body = match feedback_render(&state).await {
         Ok(body) => body,
@@ -46,7 +56,10 @@ pub(crate) async fn feedback_render(state: &Arc<AppState>) -> Result<String, Str
     let mut rows = Vec::new();
     if let Some(records) = listing.get("records").and_then(Value::as_array) {
         for record in records {
-            let seq = record.get("seq").and_then(Value::as_u64).unwrap_or_default();
+            let seq = record
+                .get("seq")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
             rows.push(format!(
                 r#"<tr><td><a href="http://127.0.0.1:{port}/feedback/{seq}">{seq}</a></td><td>{}</td><td>{}</td><td style="word-break:break-all"><code>{}</code></td><td>{}</td><td style="word-break:break-all">{}</td></tr>"#,
                 esc(record
