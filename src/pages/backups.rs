@@ -185,7 +185,7 @@ pub(crate) async fn backups_run(
             esc(&String::from_utf8_lossy(&output.stdout))
         ),
         Ok(output) => format!(
-            r#"<div class="error">The script failed — nothing lost.</div><pre>{}</pre>
+            r#"<div class="error">The script failed, and nothing was lost.</div><pre>{}</pre>
 <a href="/backups">← back</a>"#,
             esc(&String::from_utf8_lossy(&output.stderr))
         ),
@@ -224,12 +224,12 @@ pub(crate) async fn backups_drill(
         .output();
     let body = match output {
         Ok(output) if output.status.success() => format!(
-            r#"<div class="note">Drill GREEN — the restore path is proven.</div><pre>{}</pre>
+            r#"<div class="note">Drill GREEN: the restore path is proven.</div><pre>{}</pre>
 <a href="/backups">← backups</a>"#,
             esc(&String::from_utf8_lossy(&output.stdout))
         ),
         Ok(output) => format!(
-            r#"<div class="error">The drill failed — do not touch production
+            r#"<div class="error">The drill failed; do not touch production
 restore until it is understood.</div><pre>{}</pre>
 <a href="/backups">← back</a>"#,
             esc(&String::from_utf8_lossy(&output.stderr))

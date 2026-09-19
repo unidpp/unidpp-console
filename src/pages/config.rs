@@ -59,7 +59,7 @@ pub(crate) async fn config_env(
     let service = params.get("service").cloned().unwrap_or_default();
     let rendered = state.with_manifest(|m| render_env(m, &service));
     let body = format!(
-        r#"<h1>Rendered environment — <code>{}</code></h1>
+        r#"<h1>Rendered environment for <code>{}</code></h1>
 <pre>{}</pre>
 <p><a href="/config">← back to the manifest</a></p>"#,
         esc(&service),
@@ -108,12 +108,12 @@ admin token). <a href="/login">Sign in</a>.</div>
             let unset = if error.to_string().contains("unset variable") {
                 r#"<p class="note">A referenced secret variable is not set in this
 console's environment. Export it (or the deployment's service runner
-exports it) and save again — the manifest itself is fine to stage.</p>"#
+exports it) and save again; the manifest itself is fine to stage.</p>"#
             } else {
                 ""
             };
             let body = format!(
-                r#"<div class="error">Rejected — nothing was written:</div>
+                r#"<div class="error">Rejected, and nothing was written:</div>
 <pre>{}</pre>
 {unset}
 <form method="post" action="/config">

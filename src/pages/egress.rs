@@ -69,7 +69,7 @@ pub(crate) async fn egress_page(State(state): State<Arc<AppState>>) -> Response 
         let banner = if sealed {
             r#"<div class="note"><strong>Sealed.</strong> This deployment's
 egress policy is <code>none</code>: nothing leaves the box. The public
-surface below is ingress — answers, not calls.</div>"#
+surface below is ingress: answers, not calls.</div>"#
         } else {
             r#"<div class="note">Rows marked <code>sealed</code> make no
 outbound calls. The public surface is ingress.</div>"#

@@ -45,7 +45,7 @@ only.</p>
     <td><input name="contact_url" id="contact_url" style="width:100%" value="{}"></td></tr>
 </table>
 <p><button type="submit">Save branding</button>
-<span style="color:var(--muted)"> — requires a signed-in session</span></p>
+<span style="color:var(--muted)">, which requires a signed-in session</span></p>
 </form>"#,
         esc(&b.organization),
         esc(&b.product_name),
@@ -98,11 +98,11 @@ pub(crate) async fn branding_save(
         serde_yaml::to_string(&manifest).map_err(|e| e.to_string())
     });
     let body = match outcome.and_then(|text| state.save_manifest(&text).map(|_| text)) {
-        Ok(_) => r#"<div class="note">Branding saved and validated — the
+        Ok(_) => r#"<div class="note">Branding saved and validated, and the
 console re-renders everywhere on the next page load.</div>"#
             .to_string(),
         Err(error) => format!(
-            r#"<div class="error">Rejected — nothing was written: {}</div>"#,
+            r#"<div class="error">Rejected, and nothing was written: {}</div>"#,
             esc(&error)
         ),
     };

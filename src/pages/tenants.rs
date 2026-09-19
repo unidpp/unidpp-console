@@ -234,7 +234,7 @@ manifest). <a href="/tenants">← tenants</a></p>"#,
 
 pub(crate) fn tenant_error(state: &AppState, message: &str, form: &TenantForm) -> Response {
     let body = format!(
-        r#"<div class="error">Not created — {}.</div>
+        r#"<div class="error">Not created: {}.</div>
 <p>The form values were kept below; fix and resubmit.</p>
 <pre>{}</pre>
 <a href="/tenants">← start over</a>"#,
