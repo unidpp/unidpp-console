@@ -468,8 +468,11 @@ pub fn contract_yaml() -> String {
     serde_yaml::to_string(&doc).expect("contract renders as YAML")
 }
 
-async fn openapi_yaml() -> Response {
-    html_response(contract_yaml())
+async fn openapi_yaml() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/yaml")],
+        contract_yaml(),
+    )
 }
 
 /// Run until stopped (used by `main`).
