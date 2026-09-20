@@ -39,6 +39,7 @@ use unidpp_config::{load as load_manifest, OperatorManifest};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+mod durability;
 mod html;
 mod http;
 mod i18n;

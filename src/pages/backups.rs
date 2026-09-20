@@ -1,4 +1,4 @@
-//! The backup surfaces: list, run, drill — the durability script contract surfaced.
+//! The backup surfaces: list, run, drill — the durability program surfaced.
 
 use crate::i18n;
 use std::sync::Arc;
@@ -43,11 +43,10 @@ pub(crate) async fn backups_render(state: &Arc<AppState>) -> Result<String, Stri
         .to_path_buf();
     let dir = root.join("backups");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let script = root.join("unidpp-ops");
-    if !script.is_file() {
-        return Ok(r#"<h1>Backups</h1><div class="error">The operator
-script <code>unidpp-ops</code> is not present in the deployment
-root.</div>"#
+    if crate::durability::unidpp_ops(&root).is_none() {
+        return Ok(r#"<h1>Backups</h1><div class="error">The durability
+program <code>unidpp-ops</code> is not present in the deployment
+(ops-tools/target/release/unidpp-ops).</div>"#
             .to_string());
     }
     let mut rows = Vec::new();
@@ -77,8 +76,8 @@ root.</div>"#
             rows.join("")
         )
     };
-    // The schedule state (the script is the single home of the logic).
-    let schedule = match std::process::Command::new("./unidpp-ops")
+    // The schedule state (the program is the single home of the logic).
+    let schedule = match crate::durability::command(root.as_ref())
         .arg("schedule")
         .arg("--status")
         .current_dir(&root)
@@ -195,7 +194,7 @@ pub(crate) async fn backups_run(
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let output = std::process::Command::new("./unidpp-ops")
+    let output = crate::durability::command(root.as_ref())
         .arg("backup")
         .current_dir(&root)
         .output();
@@ -206,7 +205,7 @@ pub(crate) async fn backups_run(
             esc(&String::from_utf8_lossy(&output.stdout))
         ),
         Ok(output) => format!(
-            r#"<div class="error">The script failed, and nothing was lost.</div><pre>{}</pre>
+            r#"<div class="error">The program failed, and nothing was lost.</div><pre>{}</pre>
 <a href="/backups">← back</a>"#,
             esc(&String::from_utf8_lossy(&output.stderr))
         ),
@@ -218,7 +217,7 @@ pub(crate) async fn backups_run(
 }
 
 /// POST /backups/drill — run the restore rehearsal through the
-/// operator script (session-gated; the script owns the logic).
+/// durability program (session-gated; the program owns the logic).
 #[utoipa::path(
     post,
     path = "/backups/drill",
@@ -249,7 +248,7 @@ pub(crate) async fn backups_drill(
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let output = std::process::Command::new("./unidpp-ops")
+    let output = crate::durability::command(root.as_ref())
         .arg("drill")
         .current_dir(&root)
         .output();

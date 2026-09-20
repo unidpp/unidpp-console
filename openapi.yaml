@@ -132,7 +132,7 @@ paths:
           description: 'Drilled: a redirect back to the view with the drill report stated'
       summary: |-
         POST /backups/drill — run the restore rehearsal through the
-        operator script (session-gated; the script owns the logic).
+        durability program (session-gated; the program owns the logic).
       tags:
       - console
   /branding:
