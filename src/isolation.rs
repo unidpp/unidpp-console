@@ -17,11 +17,7 @@ use crate::AppState;
 
 /// Every state-path field of a manifest, as (field, value) pairs.
 pub(crate) fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, String)> {
-    fn state(
-        out: &mut Vec<(&'static str, String)>,
-        name: &'static str,
-        state_file: Option<&str>,
-    ) {
+    fn state(out: &mut Vec<(&'static str, String)>, name: &'static str, state_file: Option<&str>) {
         if let Some(state) = state_file {
             out.push((name, state.to_string()));
         }
@@ -30,12 +26,20 @@ pub(crate) fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, Str
     state(
         &mut out,
         "services.registry.state_file",
-        manifest.services.registry.as_ref().and_then(|s| s.state_file.as_deref()),
+        manifest
+            .services
+            .registry
+            .as_ref()
+            .and_then(|s| s.state_file.as_deref()),
     );
     state(
         &mut out,
         "services.trust.state_file",
-        manifest.services.trust.as_ref().and_then(|s| s.state_file.as_deref()),
+        manifest
+            .services
+            .trust
+            .as_ref()
+            .and_then(|s| s.state_file.as_deref()),
     );
     if let Some(state) = manifest
         .services
@@ -56,12 +60,20 @@ pub(crate) fn state_paths(manifest: &OperatorManifest) -> Vec<(&'static str, Str
     state(
         &mut out,
         "services.projector.state_file",
-        manifest.services.projector.as_ref().and_then(|s| s.state_file.as_deref()),
+        manifest
+            .services
+            .projector
+            .as_ref()
+            .and_then(|s| s.state_file.as_deref()),
     );
     state(
         &mut out,
         "services.archive.state_file",
-        manifest.services.archive.as_ref().and_then(|s| s.state_file.as_deref()),
+        manifest
+            .services
+            .archive
+            .as_ref()
+            .and_then(|s| s.state_file.as_deref()),
     );
     if let Some(state) = manifest
         .services
